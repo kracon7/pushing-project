@@ -1,3 +1,8 @@
+'''
+rod pushing example
+Consider the spring force, damping force and friction force
+'''
+
 import numpy as np
 import taichi as ti
 
@@ -11,7 +16,9 @@ N = 10
 rod_radius = 0.01
 hand_radius = 0.03
 
-ks = 1e3
+ks = 1e4
+eta = 10
+mu = 0.5
 
 # center of the screen
 center = ti.Vector.field(2, ti.f32, ())
@@ -65,20 +72,26 @@ def compute_force():
     for i in range(N+1):
         force[i] = [0.0, 0.0]
 
-    # compute gravitational force
     for i in range(N):
         p = pos[i]
         
         r_ij = pos[N] - p
         r = r_ij.norm(1e-5)
-        r_hat = r_ij / r
+        n_ij = r_ij / r
         if (radius[i] + radius[N] - r) > 0:
-            # print(radius[i], radius[N], r)
-            fs = - ks * (radius[i] + radius[N] - r) * r_hat  # spring force
-
-            # assign to each particle
+            fs = - ks * (radius[i] + radius[N] - r) * n_ij  # spring force
             force[i] += fs
-            force[N] -= fs
+
+            v_ij = vel[N] - vel[i]   # relative velocity
+            vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
+            fb = eta * vn_ij   # damping force
+            force[i] += fb
+
+            vt_ij = v_ij - vn_ij   # tangential velocity
+            if vn_ij.norm() > 1e-4:
+                ft = mu * (fs.norm() + fb.norm()) * vt_ij / vn_ij.norm()
+                force[i] += ft
+            # force[N] -= fs
 
 @ti.kernel
 def apply_external(geom_id: ti.i32, fx: ti.f32, fy: ti.f32):
@@ -171,7 +184,7 @@ while gui.running:
     if not paused[None]:
 
         compute_force()
-        apply_external(N, 0., 5)
+        apply_external(N, 5, 1)
         compute_ft()
         update()
         # initialize()
