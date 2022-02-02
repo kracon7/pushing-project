@@ -18,7 +18,7 @@ hand_radius = 0.03
 
 ks = 1e4
 eta = 10
-mu = 0.5
+mu = 0.1
 
 # center of the screen
 center = ti.Vector.field(2, ti.f32, ())

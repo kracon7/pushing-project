@@ -12,7 +12,8 @@ class SolarSystem:
         self.dt = dt
         self.x = ti.Vector.field(2, dtype=ti.f32, shape=n)
         self.v = ti.Vector.field(2, dtype=ti.f32, shape=n)
-        self.center = ti.Vector.field(2, dtype=ti.f32, shape=())
+        # self.center = ti.Vector.field(2, dtype=ti.f32, shape=())
+        self.center = ti.field(ti.f32, 2)
 
     @staticmethod
     @ti.func
@@ -26,14 +27,14 @@ class SolarSystem:
         # (Re)initialize particle position/velocities
         for i in range(self.n):
             offset = self.random_vector(0.5)
-            self.x[i] = self.center[None] + offset  # Offset from center
+            self.x[i] = self.center + offset  # Offset from center
             self.v[i] = [-offset.y, offset.x]  # Perpendicular to offset
             self.v[i] += self.random_vector(0.02)  # Random velocity noise
             self.v[i] *= 1 / offset.norm()**1.5  # Kepler's third law
 
     @ti.func
     def gravity(self, pos):  # Compute gravity at pos
-        offset = -(pos - self.center[None])
+        offset = -(pos - self.center)
         return offset / offset.norm()**3
 
     @ti.kernel
@@ -48,7 +49,7 @@ class SolarSystem:
 
 
 solar = SolarSystem(8, 0.0001)
-solar.center[None] = [0.5, 0.5]
+solar.center = [0.5, 0.5]
 solar.initialize_particles()
 
 gui = ti.GUI("Solar System", background_color=0x0071a)
