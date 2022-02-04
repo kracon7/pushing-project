@@ -92,7 +92,7 @@ def remap(coarse, voxel_size, fine):
         dist = np.linalg.norm(coarse[neighbors] - fine[i], axis=1)
         mapping.append(neighbors[np.argmin(dist)])
 
-    return np.stack(mapping)
+    return np.stack(mapping).astype('int')
 
 object_names = ['hammer', 'drill', 'pan', 'spray_bottle', 'wrench']
 color_bar = ["orange","pink","blue","brown","red","grey","yellow","green"]
@@ -202,17 +202,24 @@ class Composite2D():
     def __init__(self, obj_idx, coarse_vsize=0.8, fine_vsize=0.2):
         obj_name = object_names[obj_idx]
         self.polygon = poly_coords[obj_name]
-        self.gt_mass = gt_mass_dist[obj_name]
         self.C = voxelize(poly_coords[obj_name], gt_mass_dist[obj_name], coarse_vsize)
         self.F = voxelize(poly_coords[obj_name], gt_mass_dist[obj_name], fine_vsize)
         self.mapping = remap(self.C[:,:2], coarse_vsize, self.F[:,:2])
 
         self.particle_pos0 = self.F[:,:2]
 
+        self.coarse_vsize = coarse_vsize
+        self.fine_vsize = fine_vsize
+        self.num_particle = self.particle_pos0.shape[0]
+        self.mass_dim = self.C.shape[0]
+        self.mass_dist = self.C[:,2]     # coarse mass distribution
+        self.obj_name = obj_name
+
+
 
 #########################################   TEST   ########################################
 if __name__ == '__main__':
-        
+
     obj_name = object_names[2]
 
     coarse_vsize = 0.8

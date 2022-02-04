@@ -1,0 +1,269 @@
+'''
+Composite object pushing example
+Interactions considered include spring force, damping force and friction force
+'''
+import os
+import sys
+import numpy as np
+import taichi as ti
+from composite_util import Composite2D
+
+ti.init(debug=True)
+
+@ti.data_oriented
+class PushingSimulator:
+    def __init__(self, composite, dt=1e-3):  # Initializer of the pushing environment
+        self.dt = dt
+        self.max_step = 2048
+
+        # world bound
+        self.wx_min, self.wx_max, self.wy_min, self.wy_max = -30, 30, -30, 30
+
+        # render resolution
+        self.resol_x, self.resol_y = 800, 800
+        self.gui = ti.GUI(composite.obj_name, (self.resol_x, self.resol_y))
+
+        self.ngeom = composite.num_particle + 1
+        self.body_id2name = {0: composite.obj_name, 1: 'hand'}
+        self.nbody = len(self.body_id2name.keys())
+
+        # geom_body_id
+        temp = np.concatenate([np.zeros(composite.num_particle), np.array([1])])
+        self.geom_body_id = ti.field(ti.i32, shape=self.ngeom)
+        self.geom_body_id.from_numpy(temp)
+        
+        self.mass = ti.field(ti.f32, composite.mass_dim)
+        
+        # contact parameters
+        self.ks = 1e4
+        self.eta = 10
+        self.mu = 0.1
+
+        # pos, vel and force of each particle
+        self.geom_pos = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
+        self.geom_vel = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
+        self.geom_force = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
+        self.geom_pos0 = ti.Vector.field(2, ti.f32, shape=self.ngeom)
+ 
+        self.body_qpos = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
+        self.body_qvel = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
+        self.body_rpos = ti.field(ti.f32, shape=(self.max_step, self.nbody))
+        self.body_rvel = ti.field(ti.f32, shape=(self.max_step, self.nbody))
+
+        # net force and torque on body aggregated from all particles
+        self.body_force = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
+        self.body_torque = ti.field(ti.f32, shape=(self.max_step, self.nbody))
+
+        # radius of the particles
+        self.radius = ti.field(ti.f32, self.ngeom)
+
+        self.body_mass, self.body_inertia = ti.field(ti.f32, self.nbody), ti.field(ti.f32, self.nbody)
+
+        self.composite = composite
+        # composite particle pos0 in original polygon frame
+        self.composite_p0 = ti.Vector.field(2, ti.f32, shape=composite.num_particle)
+        for i in range(composite.num_particle):
+            self.composite_p0[i] = composite.particle_pos0[i]
+
+        self.mapping = ti.field(ti.i32, shape=composite.num_particle)
+        self.mapping.from_numpy(composite.mapping)
+
+    @staticmethod
+    @ti.func
+    def rotation_matrix(r):
+        return ti.Matrix([[ti.cos(r), -ti.sin(r)], [ti.sin(r), ti.cos(r)]])
+
+    @staticmethod
+    @ti.func
+    def cross_2d(v1, v2):
+        return v1[0] * v2[1] - v1[1] * v2[0]
+
+    @staticmethod
+    @ti.func
+    def right_orthogonal(v):
+        return ti.Vector([-v[1], v[0]])
+
+    @ti.kernel
+    def collide(self, s: ti.i32):
+        # compute particle force based on pair-wise collision
+        # clear force
+        for i in range(self.ngeom):
+            self.geom_force[s, i] = [0.0, 0.0]
+
+        for i in range(self.ngeom):
+            pi = self.geom_pos[s, i]
+            
+            for j in range(self.ngeom):
+                if self.geom_body_id[i] != self.geom_body_id[j]:
+                    pj = self.geom_pos[s, j]
+                    r_ij = pj - pi
+                    r = r_ij.norm(1e-5)
+                    n_ij = r_ij / r      # normal direction
+                    if (self.radius[i] + self.radius[j] - r) > 0:
+                        # spring force
+                        fs = - self.ks * (self.radius[i] + self.radius[j] - r) * n_ij  
+                        self.geom_force[s, i] += fs
+
+                        # relative velocity
+                        v_ij = self.geom_vel[s, j] - self.geom_vel[s, i]   
+                        vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
+                        fb = self.eta * vn_ij   # damping force
+                        self.geom_force[s, i] += fb
+
+                        # tangential velocity
+                        vt_ij = v_ij - vn_ij   
+                        if vn_ij.norm() > 1e-4:
+                            ft = self.mu * (fs.norm() + fb.norm()) * vt_ij / vn_ij.norm()
+                            self.geom_force[s, i] += ft
+                
+    @ti.kernel
+    def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f32, fy: ti.f32):
+        self.geom_force[s, geom_id][0] += fx
+        self.geom_force[s, geom_id][1] += fy
+
+    @ti.kernel
+    def compute_ft(self, s: ti.i32):
+        # compute the force torque on rigid bodies
+        # clear net force and torque
+        for i in range(self.nbody):
+            self.body_force[s, i], self.body_torque[s, i] = [0.,0.], 0.
+
+        for i in range(self.ngeom):
+            body_id = self.geom_body_id[i]
+            self.body_force[s, body_id] += self.geom_force[s, i]
+            self.body_torque[s, body_id] += self.cross_2d(self.geom_force[s, i], 
+                                                (self.body_qpos[s, body_id] - self.geom_pos[s, i]))
+
+    @ti.kernel
+    def update(self, s: ti.i32):
+        for i in range(self.nbody):
+            self.body_qvel[s+1, i] = self.body_qvel[s, i] + \
+                                     self.dt * self.body_force[s, i] / self.body_mass[i]
+            self.body_rvel[s+1, i] = self.body_rvel[s+1, i] + \
+                                     self.dt * self.body_torque[s, i] / self.body_inertia[i]
+
+            # update body qpos and rpos
+            self.body_qpos[s+1, i] = self.body_qpos[s, i] + \
+                                     self.dt * self.body_qvel[s+1, i] 
+            self.body_rpos[s+1, i] = self.body_rpos[s, i] + \
+                                     self.dt * self.body_rvel[s+1, i]
+
+        # print(self.body_qpos[0, 0], self.body_qpos[0,1], self.body_qpos[1, 0], self.body_qpos[1,1],
+        #      self.body_qpos[2, 0], self.body_qpos[2,1], '\n===================')
+
+        for i in range(self.ngeom):
+            body_id = self.geom_body_id[i]
+            rot = self.rotation_matrix(self.body_rpos[s+1, body_id])
+            self.geom_pos[s+1, i] = self.body_qpos[s+1, body_id] + rot @ self.geom_pos0[i]
+            self.geom_vel[s+1, i] = self.body_qvel[s+1, body_id] + self.body_rvel[s+1, body_id] \
+                                            * self.right_orthogonal(rot @ self.geom_pos0[i])
+
+    @ti.kernel
+    def initialize(self, ox: ti.f32, oy: ti.f32, rot: ti.f32):
+        self.place_composite(ox, oy, rot)
+        self.place_hand(ox, oy, rot)
+        self.set_scene()
+
+    @ti.func
+    def place_composite(self, offset_x, offset_y, rotation):
+        '''
+        place the composite object in the world based on offset and rotation
+        '''
+        # compute particle positions
+        R = self.rotation_matrix(rotation)
+
+        for i in range(self.composite.num_particle):
+            self.geom_pos[0, i] = R @ self.composite_p0[i] + ti.Vector([offset_x, offset_y])
+            self.geom_vel[0, i] = [0., 0.]
+
+    @ti.func
+    def place_hand(self, offset_x, offset_y, rotation):
+        i = self.composite.num_particle
+        self.geom_pos[0, i] = [12., 0.]
+        self.geom_vel[0, i] = [0., 0.]
+
+        self.body_qpos[0, 1] = self.geom_pos[0, i]
+        self.body_qvel[0, 1] = [0., 0.]
+        self.body_rpos[0, 1] = 0.
+        self.body_rvel[0, 1] = 0.
+
+    @ti.func
+    def set_scene(self):
+        ######################   composite body   #######################
+        s, body_id, n = 0, 0, self.composite.num_particle
+        for i in range(n):
+            self.body_mass[body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]]
+
+        # compute the body_qpos, body_qvel, body_rpos, body_rvel
+        self.body_qpos[s, body_id] = [0., 0.]
+        for i in range(n):
+            self.body_qpos[s, body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]]\
+                                         / self.body_mass[body_id] * self.geom_pos[s, i]
+        self.body_qvel[s, body_id] = [0., 0.]
+        self.body_rpos[s, body_id] = 0.
+        self.body_rvel[s, body_id] = 0.
+
+        # inertia
+        self.body_inertia[body_id] = 0.
+        for i in range(n):
+            self.body_inertia[body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]] * \
+                                0.01*(self.geom_pos[s, i] - self.body_qpos[s, body_id]).norm()**2
+
+        # geom_pos0
+        for i in range(n):
+            self.geom_pos0[i] = self.geom_pos[s, i] - self.body_qpos[s, body_id]
+
+        # radius
+        for i in range(n):
+            self.radius[i] = self.composite.fine_vsize/2
+
+        ######################   hand   #######################
+        s, body_id = 0, 1
+        self.body_mass[body_id] = 1e2
+        self.body_inertia[body_id] = 1e2
+        self.radius[n] = 2
+        self.geom_pos0[n] = [0., 0.]
+
+        print(self.body_mass[0], self.body_mass[1], self.body_inertia[0], self.body_inertia[1])
+        
+
+    def render(self, s):  # Render the scene on GUI
+        np_pos = self.geom_pos.to_numpy()[s]
+        # print(np_pos[:10])
+        np_pos = (np_pos - np.array([self.wx_min, self.wy_min])) / \
+                 (np.array([self.wx_max-self.wx_min, self.wy_max-self.wy_min]))
+
+        # composite object
+        r = self.radius[0] * self.resol_x / (self.wx_max-self.wx_min)
+        self.gui.circles(np_pos[:self.composite.num_particle], color=0xffffff, radius=r)
+
+        # hand
+        r = self.radius[self.composite.num_particle] * self.resol_x / (self.wx_max-self.wx_min)
+        self.gui.circles(np_pos[self.composite.num_particle].reshape(1,2), color=0x09ffff, radius=r)
+
+        self.gui.show()
+
+
+#################################      Test     ##################################
+if __name__ == '__main__':
+    composite = Composite2D(0)
+    sim = PushingSimulator(composite)
+
+    sim.mass.from_numpy(composite.mass_dist)
+
+    sim.initialize(0., 0., 0.)
+
+
+    for s in range(sim.max_step-1):
+
+        for e in sim.gui.get_events(ti.GUI.PRESS):
+            if e.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
+                exit()
+
+        sim.collide(s)
+        sim.apply_external(s, composite.num_particle, 0, 10000)
+        sim.compute_ft(s)
+        sim.update(s)
+        sim.render(s)
+
+        # print(sim.body_qpos.to_numpy()[s, 1])
