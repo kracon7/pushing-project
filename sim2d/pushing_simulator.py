@@ -33,11 +33,16 @@ class PushingSimulator:
         self.geom_body_id.from_numpy(temp)
         
         self.mass = ti.field(ti.f32, composite.mass_dim)
+
+        # hand mass
+        self.hand_mass = 1e2
+        self.hand_inertia = 1e2
         
         # contact parameters
         self.ks = 1e4
         self.eta = 10
-        self.mu = 0.1
+        self.mu_s = 0.1
+        self.mu_b = 0.3
 
         # pos, vel and force of each particle
         self.geom_pos = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
@@ -65,6 +70,7 @@ class PushingSimulator:
         for i in range(composite.num_particle):
             self.composite_p0[i] = composite.particle_pos0[i]
 
+        # mapping from fine grid voxel to coarse voxel representation in composite object
         self.mapping = ti.field(ti.i32, shape=composite.num_particle)
         self.mapping.from_numpy(composite.mapping)
 
@@ -85,12 +91,27 @@ class PushingSimulator:
 
     @ti.kernel
     def collide(self, s: ti.i32):
-        # compute particle force based on pair-wise collision
+        '''
+        compute particle force based on pair-wise collision
+        compute bottom friction force
+        '''
         # clear force
         for i in range(self.ngeom):
             self.geom_force[s, i] = [0.0, 0.0]
 
         for i in range(self.ngeom):
+
+            # bottom friction
+            if self.geom_vel[s, i].norm() > 1e-5:
+                # composite body
+                if self.geom_body_id[i] == 0:
+                    fb = - self.mu_b * self.mass[self.mapping[i]] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                    self.geom_force[s, i] += fb
+                # hand
+                elif self.geom_body_id[i] == 1:
+                    fb = - self.mu_b * self.hand_mass * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                    self.geom_force[s, i] += fb
+
             pi = self.geom_pos[s, i]
             
             for j in range(self.ngeom):
@@ -107,13 +128,13 @@ class PushingSimulator:
                         # relative velocity
                         v_ij = self.geom_vel[s, j] - self.geom_vel[s, i]   
                         vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
-                        fb = self.eta * vn_ij   # damping force
-                        self.geom_force[s, i] += fb
+                        fd = self.eta * vn_ij   # damping force
+                        self.geom_force[s, i] += fd
 
-                        # tangential velocity
+                        # side friction is activated with non-zero tangential velocity and non-breaking contact
                         vt_ij = v_ij - vn_ij   
-                        if vn_ij.norm() > 1e-4:
-                            ft = self.mu * (fs.norm() + fb.norm()) * vt_ij / vn_ij.norm()
+                        if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
+                            ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
                             self.geom_force[s, i] += ft
                 
     @ti.kernel
@@ -219,13 +240,10 @@ class PushingSimulator:
 
         ######################   hand   #######################
         s, body_id = 0, 1
-        self.body_mass[body_id] = 1e2
-        self.body_inertia[body_id] = 1e2
+        self.body_mass[body_id] = self.hand_mass
+        self.body_inertia[body_id] = self.hand_inertia
         self.radius[n] = 2
-        self.geom_pos0[n] = [0., 0.]
-
-        print(self.body_mass[0], self.body_mass[1], self.body_inertia[0], self.body_inertia[1])
-        
+        self.geom_pos0[n] = [0., 0.]        
 
     def render(self, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[s]
