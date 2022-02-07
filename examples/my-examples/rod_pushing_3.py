@@ -1,12 +1,12 @@
 '''
 rod pushing example
-Consider the spring force, damping force and friction force
+Consider the spring force, damping force, side friction force and bottom friction froce
 '''
 
 import numpy as np
 import taichi as ti
 
-ti.init(arch=ti.gpu)
+ti.init(arch=ti.gpu, debug=True)
 
 # global control
 paused = ti.field(ti.i32, ())
@@ -18,7 +18,8 @@ hand_radius = 0.03
 
 ks = 1e4
 eta = 10
-mu = 0.1
+mu_s = 0.2
+mu_b = 1
 
 # center of the screen
 center = ti.Vector.field(2, ti.f32, ())
@@ -88,12 +89,18 @@ def compute_force():
             force[i] += fb
 
             vt_ij = v_ij - vn_ij   # tangential velocity
-            
+
             # side friction is activated with non-zero tangential velocity and non-breaking contact
             if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
-                ft = mu * (fs.norm() + fb.norm()) * vt_ij / vn_ij.norm()
+                ft = mu_s * (fs.norm() + fb.norm()) * vt_ij / vn_ij.norm()
                 force[i] += ft
-                
+            
+        # bottom friction
+        if vel[i].norm() > 1e-5:
+            fb = - mu_b * mass[i] * (vel[i] / vel[i].norm())
+            force[i] += fb
+
+
 @ti.kernel
 def apply_external(geom_id: ti.i32, fx: ti.f32, fy: ti.f32):
     force[geom_id][0] += fx
@@ -172,6 +179,7 @@ def initialize():
 gui = ti.GUI('Rod Pushing', (800, 800))
 
 initialize()
+s = 0
 while gui.running:
 
     for e in gui.get_events(ti.GUI.PRESS):
@@ -185,7 +193,8 @@ while gui.running:
     if not paused[None]:
 
         compute_force()
-        apply_external(N, 5, 1)
+        if s < 100:
+            apply_external(N, 0, 5)
         compute_ft()
         update()
         # initialize()
@@ -194,3 +203,5 @@ while gui.running:
     gui.circles(np_pos[:N], color=0xffffff, radius=rod_radius*800)
     gui.circles(np_pos[N].reshape(1,2), color=0x09ffff, radius=hand_radius*800)
     gui.show()
+
+    s += 1
