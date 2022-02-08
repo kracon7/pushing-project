@@ -177,36 +177,5 @@ def optimize():
     forward(visualize=True, output='final')
 
 
-def scan(zoom):
-    N = 1000
-    angles = []
-    losses = []
-    forward(visualize=True, output='initial')
-    for i in range(N):
-        alpha = ((i + 0.5) / N - 0.5) * math.pi * zoom
-        init_x[None] = [0.1, 0.5]
-        init_v[None] = [0.3 * math.cos(alpha), 0.3 * math.sin(alpha)]
-
-        loss[None] = 0
-        clear()
-        forward(visualize=False)
-        print(loss[None])
-
-        losses.append(loss[None])
-        angles.append(math.degrees(alpha))
-
-    plt.plot(angles, losses)
-    fig = plt.gcf()
-    fig.set_size_inches(5, 3)
-    plt.title('Billiard Scene Objective')
-    plt.ylabel('Objective')
-    plt.xlabel('Angle of velocity')
-    plt.tight_layout()
-    plt.show()
-
-
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        scan(float(sys.argv[1]))
-    else:
-        optimize()
+    optimize()

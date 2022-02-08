@@ -7,8 +7,9 @@ import sys
 import numpy as np
 import taichi as ti
 from composite_util import Composite2D
+from action import build_exterior_mesh
 
-ti.init(debug=True)
+ti.init(arch=ti.gpu, debug=True)
 
 @ti.data_oriented
 class PushingSimulator:
@@ -31,6 +32,12 @@ class PushingSimulator:
         temp = np.concatenate([np.zeros(composite.num_particle), np.array([1])])
         self.geom_body_id = ti.field(ti.i32, shape=self.ngeom)
         self.geom_body_id.from_numpy(temp)
+
+        # body_geom_id
+        self.composite_geom_id = ti.field(ti.i32, shape=composite.num_particle)
+        self.composite_geom_id.from_numpy(np.arange(composite.num_particle))
+        self.hand_geom_id = ti.field(ti.i32, shape=())
+        self.hand_geom_id = composite.num_particle
         
         self.mass = ti.field(ti.f32, composite.mass_dim)
 
@@ -73,6 +80,9 @@ class PushingSimulator:
         # mapping from fine grid voxel to coarse voxel representation in composite object
         self.mapping = ti.field(ti.i32, shape=composite.num_particle)
         self.mapping.from_numpy(composite.mapping)
+
+        # compute actions for composite in (0., 0.) 0. pose
+        
 
     @staticmethod
     @ti.func
@@ -199,7 +209,7 @@ class PushingSimulator:
 
     @ti.func
     def place_hand(self, offset_x, offset_y, rotation):
-        i = self.composite.num_particle
+        i = self.hand_geom_id
         self.geom_pos[0, i] = [12., 0.]
         self.geom_vel[0, i] = [0., 0.]
 
@@ -212,12 +222,12 @@ class PushingSimulator:
     def set_scene(self):
         ######################   composite body   #######################
         s, body_id, n = 0, 0, self.composite.num_particle
-        for i in range(n):
+        for i in self.composite_geom_id:
             self.body_mass[body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]]
 
         # compute the body_qpos, body_qvel, body_rpos, body_rvel
         self.body_qpos[s, body_id] = [0., 0.]
-        for i in range(n):
+        for i in self.composite_geom_id:
             self.body_qpos[s, body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]]\
                                          / self.body_mass[body_id] * self.geom_pos[s, i]
         self.body_qvel[s, body_id] = [0., 0.]
@@ -226,24 +236,22 @@ class PushingSimulator:
 
         # inertia
         self.body_inertia[body_id] = 0.
-        for i in range(n):
+        for i in self.composite_geom_id:
             self.body_inertia[body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]] * \
                                 0.01*(self.geom_pos[s, i] - self.body_qpos[s, body_id]).norm()**2
 
-        # geom_pos0
-        for i in range(n):
+        for i in self.composite_geom_id:
+            # geom_pos0
             self.geom_pos0[i] = self.geom_pos[s, i] - self.body_qpos[s, body_id]
-
-        # radius
-        for i in range(n):
+            # radius
             self.radius[i] = self.composite.fine_vsize/2
 
         ######################   hand   #######################
         s, body_id = 0, 1
         self.body_mass[body_id] = self.hand_mass
         self.body_inertia[body_id] = self.hand_inertia
-        self.radius[n] = 2
-        self.geom_pos0[n] = [0., 0.]        
+        self.radius[self.hand_geom_id] = 2
+        self.geom_pos0[self.hand_geom_id] = [0., 0.]        
 
     def render(self, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[s]
@@ -253,11 +261,13 @@ class PushingSimulator:
 
         # composite object
         r = self.radius[0] * self.resol_x / (self.wx_max-self.wx_min)
-        self.gui.circles(np_pos[:self.composite.num_particle], color=0xffffff, radius=r)
+        idx = self.composite_geom_id.to_numpy()
+        self.gui.circles(np_pos[idx], color=0xffffff, radius=r)
 
         # hand
-        r = self.radius[self.composite.num_particle] * self.resol_x / (self.wx_max-self.wx_min)
-        self.gui.circles(np_pos[self.composite.num_particle].reshape(1,2), color=0x09ffff, radius=r)
+        idx = self.hand_geom_id
+        r = self.radius[idx] * self.resol_x / (self.wx_max-self.wx_min)
+        self.gui.circles(np_pos[idx].reshape(1,2), color=0x09ffff, radius=r)
 
         self.gui.show()
 

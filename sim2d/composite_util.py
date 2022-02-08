@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib import path
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
+from action import *
 
 def plot_polygon(ax, coord, gt_mass_regions=None):
     '''
@@ -215,6 +216,52 @@ class Composite2D():
         self.mass_dist = self.C[:,2]     # coarse mass distribution
         self.obj_name = obj_name
 
+        # actions
+        polygon, polygon_coord, normals = build_exterior_mesh(self.particle_pos0, self.fine_vsize)
+        self.polygon = polygon
+        self.polygon_coord = polygon_coord
+        self.normals = normals
+
+
+    def compute_actions(self, hand_radius=2):
+        # compute all valid actions
+        
+        N = self.polygon.shape[0]
+
+        action = {'start_pos': [], 'direction': []}
+
+        for idx in range(N):
+            vtx, nml = self.polygon_coord[idx], self.normals[idx]        
+            start_pos = vtx + hand_radius * nml
+
+            count = 0
+            while self.overlap_check(self.polygon_coord, self.fine_vsize, start_pos, hand_radius):
+                start_pos += 0.5 * nml
+                count += 1
+
+            if count <= 3:
+                action['start_pos'].append(start_pos)
+                action['direction'].append(-nml)
+
+        action['start_pos'] = np.stack(action['start_pos'])
+        action['direction'] = np.stack(action['direction'])
+
+        return action
+
+
+    def overlap_check(self, pts1, r1, pts2, r2):
+        '''
+        check if circles with center pts1 and radius r1 has overelap with circles 
+        with center pts2 and radius r2
+        '''
+        point_tree = spatial.cKDTree(pts1)
+        neighbors_list = point_tree.query_ball_point(pts2, r1 + r2)
+        if len(neighbors_list) > 0:
+            return True
+        else:
+            return False
+
+
 
 
 #########################################   TEST   ########################################
@@ -240,4 +287,31 @@ if __name__ == '__main__':
         
     for i, pt in enumerate(F[:,:2]):
         ax.plot(pt[0], pt[1], c=[C[mapping[i],2]*90/255, 0, 0], marker='o')
+
+    plt.show()
+
+
+    # plot all actions and polygons
+    composite = Composite2D(0)
+    polygon, polygon_coord, normals = composite.polygon, composite.polygon_coord, composite.normals
+    fig, ax = plt.subplots(1,1)
+    num_vertices = polygon.shape[0]
+    # # plot normal directions
+    # for i in range(num_vertices):
+    #     pt_coord = polygon_coord[polygon[i, 0]]
+    #     plt.plot([pt_coord[0], pt_coord[0] + 3*normals[i,0]], 
+    #                [pt_coord[1], pt_coord[1] + 3*normals[i,1]], color='r')
+    plt.plot([polygon_coord[0,0], polygon_coord[-1,0]], 
+             [polygon_coord[0,1], polygon_coord[-1,1]], color='deepskyblue')
+    plt.plot(polygon_coord[:, 0], polygon_coord[:,1], color='deepskyblue')
+
+    actions = composite.compute_actions(1)
+    for i in range(actions['start_pos'].shape[0]):
+        start_pos, direction = actions['start_pos'][i], actions['direction'][i]        
+        c = plt.Circle((start_pos[0], start_pos[1]), 1, color='yellow')
+        ax.add_patch(c)
+
+        plt.plot([start_pos[0], start_pos[0] + 2*direction[0]],
+                  [start_pos[1], start_pos[1] + 2*direction[1]], color='lightgreen')
+
     plt.show()
