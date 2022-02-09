@@ -5,7 +5,7 @@ import scipy.spatial as spatial
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit 
-from composite_util import Composite2D
+
 
 def random_action(particle_pos, particle_radius, hand_radius):
     '''
@@ -346,6 +346,7 @@ def compute_polygon_normal(smooth_polygon, smooth_points, num_ave=2):
 
 
 if __name__ == '__main__':
+    from composite_util import Composite2D
 
     composite = Composite2D(0)
 

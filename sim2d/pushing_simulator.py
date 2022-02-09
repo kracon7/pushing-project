@@ -7,7 +7,6 @@ import sys
 import numpy as np
 import taichi as ti
 from composite_util import Composite2D
-from action import build_exterior_mesh
 
 ti.init(arch=ti.gpu, debug=True)
 
@@ -39,11 +38,11 @@ class PushingSimulator:
         self.hand_geom_id = ti.field(ti.i32, shape=())
         self.hand_geom_id = composite.num_particle
         
-        self.mass = ti.field(ti.f32, composite.mass_dim)
+        self.mass = ti.field(ti.f64, composite.mass_dim)
 
         # hand mass
-        self.hand_mass = 1e2
-        self.hand_inertia = 1e2
+        self.hand_mass = 1e4
+        self.hand_inertia = 1e4
         
         # contact parameters
         self.ks = 1e4
@@ -52,28 +51,29 @@ class PushingSimulator:
         self.mu_b = 0.3
 
         # pos, vel and force of each particle
-        self.geom_pos = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
-        self.geom_vel = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
-        self.geom_force = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.ngeom))
-        self.geom_pos0 = ti.Vector.field(2, ti.f32, shape=self.ngeom)
+        self.geom_pos = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.ngeom))
+        self.geom_vel = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.ngeom))
+        self.geom_force = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.ngeom))
+        self.geom_pos0 = ti.Vector.field(2, ti.f64, shape=self.ngeom)
  
-        self.body_qpos = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
-        self.body_qvel = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
-        self.body_rpos = ti.field(ti.f32, shape=(self.max_step, self.nbody))
-        self.body_rvel = ti.field(ti.f32, shape=(self.max_step, self.nbody))
+        self.body_qpos = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.nbody))
+        self.body_qvel = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.nbody))
+        self.body_rpos = ti.field(ti.f64, shape=(self.max_step, self.nbody))
+        self.body_rvel = ti.field(ti.f64, shape=(self.max_step, self.nbody))
 
         # net force and torque on body aggregated from all particles
-        self.body_force = ti.Vector.field(2, ti.f32, shape=(self.max_step, self.nbody))
-        self.body_torque = ti.field(ti.f32, shape=(self.max_step, self.nbody))
+        self.body_force = ti.Vector.field(2, ti.f64, shape=(self.max_step, self.nbody))
+        self.body_torque = ti.field(ti.f64, shape=(self.max_step, self.nbody))
 
         # radius of the particles
-        self.radius = ti.field(ti.f32, self.ngeom)
+        self.radius = ti.field(ti.f64, self.ngeom)
+        self.hand_radius = 2
 
-        self.body_mass, self.body_inertia = ti.field(ti.f32, self.nbody), ti.field(ti.f32, self.nbody)
+        self.body_mass, self.body_inertia = ti.field(ti.f64, self.nbody), ti.field(ti.f64, self.nbody)
 
         self.composite = composite
         # composite particle pos0 in original polygon frame
-        self.composite_p0 = ti.Vector.field(2, ti.f32, shape=composite.num_particle)
+        self.composite_p0 = ti.Vector.field(2, ti.f64, shape=composite.num_particle)
         for i in range(composite.num_particle):
             self.composite_p0[i] = composite.particle_pos0[i]
 
@@ -82,7 +82,13 @@ class PushingSimulator:
         self.mapping.from_numpy(composite.mapping)
 
         # compute actions for composite in (0., 0.) 0. pose
-        
+        actions = composite.compute_actions(self.hand_radius)
+        self.n_actions = actions['start_pos'].shape[0]
+        self.pushing = ti.Vector.field(4, ti.f64, shape=self.n_actions)
+        self.pushing.from_numpy(np.concatenate([actions['start_pos'], actions['direction']], axis=1))
+
+        # hand initial velocity
+        self.hand_vel = 20
 
     @staticmethod
     @ti.func
@@ -119,7 +125,7 @@ class PushingSimulator:
                     self.geom_force[s, i] += fb
                 # hand
                 elif self.geom_body_id[i] == 1:
-                    fb = - self.mu_b * self.hand_mass * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                    fb = - 1 * self.hand_mass * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
                     self.geom_force[s, i] += fb
 
             pi = self.geom_pos[s, i]
@@ -148,7 +154,7 @@ class PushingSimulator:
                             self.geom_force[s, i] += ft
                 
     @ti.kernel
-    def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f32, fy: ti.f32):
+    def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f64, fy: ti.f64):
         self.geom_force[s, geom_id][0] += fx
         self.geom_force[s, geom_id][1] += fy
 
@@ -190,33 +196,37 @@ class PushingSimulator:
                                             * self.right_orthogonal(rot @ self.geom_pos0[i])
 
     @ti.kernel
-    def initialize(self, ox: ti.f32, oy: ti.f32, rot: ti.f32):
-        self.place_composite(ox, oy, rot)
-        self.place_hand(ox, oy, rot)
+    def initialize(self, action_idx: ti.i32):
+        self.place_composite()
+        self.place_hand(action_idx)
         self.set_scene()
 
     @ti.func
-    def place_composite(self, offset_x, offset_y, rotation):
+    def place_composite(self):
         '''
         place the composite object in the world based on offset and rotation
         '''
-        # compute particle positions
-        R = self.rotation_matrix(rotation)
-
-        for i in range(self.composite.num_particle):
-            self.geom_pos[0, i] = R @ self.composite_p0[i] + ti.Vector([offset_x, offset_y])
+        for i in self.composite_geom_id:
+            self.geom_pos[0, i] = self.composite_p0[i]
             self.geom_vel[0, i] = [0., 0.]
 
     @ti.func
-    def place_hand(self, offset_x, offset_y, rotation):
-        i = self.hand_geom_id
-        self.geom_pos[0, i] = [12., 0.]
-        self.geom_vel[0, i] = [0., 0.]
+    def place_hand(self, action_idx):
+        if action_idx < 0:
+            action_idx = ti.cast(self.n_actions * ti.random(dtype=float), ti.i32)
+        action = self.pushing[action_idx]
 
-        self.body_qpos[0, 1] = self.geom_pos[0, i]
-        self.body_qvel[0, 1] = [0., 0.]
-        self.body_rpos[0, 1] = 0.
-        self.body_rvel[0, 1] = 0.
+        ig = self.hand_geom_id
+        self.geom_pos[0, ig][0] = action[0]  # x
+        self.geom_pos[0, ig][1] = action[1]  # y
+        self.geom_vel[0, ig][0] = self.hand_vel * action[2]  # vx
+        self.geom_vel[0, ig][1] = self.hand_vel * action[3]  # vy
+
+        ib = self.geom_body_id[ig]
+        self.body_qpos[0, ib] = self.geom_pos[0, ig]
+        self.body_qvel[0, ib] = self.geom_vel[0, ig]
+        self.body_rpos[0, ib] = 0.
+        self.body_rvel[0, ib] = 0.
 
     @ti.func
     def set_scene(self):
@@ -250,7 +260,7 @@ class PushingSimulator:
         s, body_id = 0, 1
         self.body_mass[body_id] = self.hand_mass
         self.body_inertia[body_id] = self.hand_inertia
-        self.radius[self.hand_geom_id] = 2
+        self.radius[self.hand_geom_id] = self.hand_radius
         self.geom_pos0[self.hand_geom_id] = [0., 0.]        
 
     def render(self, s):  # Render the scene on GUI
@@ -279,8 +289,7 @@ if __name__ == '__main__':
 
     sim.mass.from_numpy(composite.mass_dist)
 
-    sim.initialize(0., 0., 0.)
-
+    sim.initialize(12)
 
     for s in range(sim.max_step-1):
 
@@ -289,9 +298,9 @@ if __name__ == '__main__':
                 exit()
 
         sim.collide(s)
-        sim.apply_external(s, composite.num_particle, 0, 10000)
+        # sim.apply_external(s, composite.num_particle, 0, 10000)
         sim.compute_ft(s)
         sim.update(s)
         sim.render(s)
 
-        # print(sim.body_qpos.to_numpy()[s, 1])
+        print(sim.body_qvel[s, 1], sim.geom_force[s, 1166])

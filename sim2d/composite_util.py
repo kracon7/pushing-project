@@ -236,7 +236,7 @@ class Composite2D():
 
             count = 0
             while self.overlap_check(self.polygon_coord, self.fine_vsize, start_pos, hand_radius):
-                start_pos += 0.5 * nml
+                start_pos += 0.2 * nml
                 count += 1
 
             if count <= 3:
@@ -260,8 +260,6 @@ class Composite2D():
             return True
         else:
             return False
-
-
 
 
 #########################################   TEST   ########################################
@@ -305,10 +303,11 @@ if __name__ == '__main__':
              [polygon_coord[0,1], polygon_coord[-1,1]], color='deepskyblue')
     plt.plot(polygon_coord[:, 0], polygon_coord[:,1], color='deepskyblue')
 
-    actions = composite.compute_actions(1)
+    hand_radius = 2
+    actions = composite.compute_actions(hand_radius)
     for i in range(actions['start_pos'].shape[0]):
         start_pos, direction = actions['start_pos'][i], actions['direction'][i]        
-        c = plt.Circle((start_pos[0], start_pos[1]), 1, color='yellow')
+        c = plt.Circle((start_pos[0], start_pos[1]), hand_radius, color='yellow')
         ax.add_patch(c)
 
         plt.plot([start_pos[0], start_pos[0] + 2*direction[0]],
