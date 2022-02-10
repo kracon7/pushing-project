@@ -185,7 +185,7 @@ while gui.running:
     if not paused[None]:
 
         compute_force()
-        apply_external(N, 5, 1)
+        apply_external(N, 0, 5)
         compute_ft()
         update()
         # initialize()

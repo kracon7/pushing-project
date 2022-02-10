@@ -6,15 +6,13 @@ import os
 import sys
 import numpy as np
 import taichi as ti
-from composite_util import Composite2D
-
-ti.init(arch=ti.gpu, debug=True)
+from .composite_util import Composite2D
 
 @ti.data_oriented
 class PushingSimulator:
     def __init__(self, composite, dt=1e-3):  # Initializer of the pushing environment
         self.dt = dt
-        self.max_step = 2048
+        self.max_step = 512
 
         # world bound
         self.wx_min, self.wx_max, self.wy_min, self.wy_max = -30, 30, -30, 30
@@ -125,7 +123,7 @@ class PushingSimulator:
                     self.geom_force[s, i] += fb
                 # hand
                 elif self.geom_body_id[i] == 1:
-                    fb = - 1 * self.hand_mass * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                    fb = - 0 * self.hand_mass * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
                     self.geom_force[s, i] += fb
 
             pi = self.geom_pos[s, i]
@@ -176,7 +174,7 @@ class PushingSimulator:
         for i in range(self.nbody):
             self.body_qvel[s+1, i] = self.body_qvel[s, i] + \
                                      self.dt * self.body_force[s, i] / self.body_mass[i]
-            self.body_rvel[s+1, i] = self.body_rvel[s+1, i] + \
+            self.body_rvel[s+1, i] = self.body_rvel[s, i] + \
                                      self.dt * self.body_torque[s, i] / self.body_inertia[i]
 
             # update body qpos and rpos
@@ -281,24 +279,3 @@ class PushingSimulator:
 
         self.gui.show()
 
-
-#################################      Test     ##################################
-if __name__ == '__main__':
-    composite = Composite2D(0)
-    sim = PushingSimulator(composite)
-
-    sim.mass.from_numpy(composite.mass_dist)
-
-    sim.initialize(12)
-
-    for s in range(sim.max_step-1):
-
-        for e in sim.gui.get_events(ti.GUI.PRESS):
-            if e.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
-                exit()
-
-        sim.collide(s)
-        # sim.apply_external(s, composite.num_particle, 0, 10000)
-        sim.compute_ft(s)
-        sim.update(s)
-        sim.render(s)

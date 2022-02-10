@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib import path
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
-from action import *
+from .action import build_exterior_mesh
 
 def plot_polygon(ax, coord, gt_mass_regions=None):
     '''
