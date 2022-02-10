@@ -86,7 +86,7 @@ class PushingSimulator:
         self.pushing.from_numpy(np.concatenate([actions['start_pos'], actions['direction']], axis=1))
 
         # hand initial velocity
-        self.hand_vel = 20
+        self.hand_vel = 10
 
     @staticmethod
     @ti.func
@@ -246,7 +246,7 @@ class PushingSimulator:
         self.body_inertia[body_id] = 0.
         for i in self.composite_geom_id:
             self.body_inertia[body_id] += self.composite.fine_vsize**2 * self.mass[self.mapping[i]] * \
-                                0.01*(self.geom_pos[s, i] - self.body_qpos[s, body_id]).norm()**2
+                                (self.geom_pos[s, i] - self.body_qpos[s, body_id]).norm()**2
 
         for i in self.composite_geom_id:
             # geom_pos0
