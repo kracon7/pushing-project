@@ -29,7 +29,7 @@ x_inc = vec()  # for TOI
 v = vec()
 impulse = vec()
 
-billiard_layers = 4
+billiard_layers = 2
 n_balls = 1 + (1 + billiard_layers) * billiard_layers // 2
 target_ball = n_balls - 1
 # target_ball = 0
@@ -44,7 +44,7 @@ ti.root.lazy_grad()
 
 dt = 0.003
 alpha = 0.00000
-learning_rate = 0.01
+learning_rate = 0.001
 
 
 @ti.func

@@ -302,5 +302,3 @@ if __name__ == '__main__':
         sim.compute_ft(s)
         sim.update(s)
         sim.render(s)
-
-        print(sim.body_qvel[s, 1], sim.geom_force[s, 1166])
