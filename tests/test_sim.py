@@ -5,7 +5,7 @@ import taichi as ti
 from taichi_pushing.composite_util import Composite2D
 from taichi_pushing.pushing_simulator import PushingSimulator
 
-ti.init(arch=ti.gpu)
+ti.init(arch=ti.cpu)
 
 if __name__ == '__main__':
     composite = Composite2D(0)
@@ -26,3 +26,5 @@ if __name__ == '__main__':
         sim.compute_ft(s)
         sim.update(s)
         sim.render(s)
+
+        print(sim.body_force[s, 0], sim.body_force[s, 1])
