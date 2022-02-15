@@ -21,6 +21,7 @@ eta = 10
 mu_s = 0.2
 mu_b = 1
 
+
 # center of the screen
 center = ti.Vector.field(2, ti.f32, ())
 

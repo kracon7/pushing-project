@@ -8,7 +8,7 @@ from taichi_pushing.utils import Defaults
 
 DTYPE = Defaults.DTYPE
 
-ti.init(arch=ti.cpu)
+ti.init(arch=ti.cpu, debug=False)
 
 @ti.data_oriented
 class Loss():
@@ -48,7 +48,7 @@ def run_world(sim, action_idx):
         sim.collide(s)
         sim.compute_ft(s)
         sim.update(s)
-        sim.render(s)
+        # sim.render(s)
 
 def run_episode(action_idx=10):
     run_world(sim_est, action_idx)
