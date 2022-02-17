@@ -137,8 +137,8 @@ class PushingSimulator:
         for i in range(self.ngeom):
 
             # bottom friction
-            if self.geom_vel[s, i].norm() > 1e-5:
-                fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+            if self.geom_vel[s, i].norm(1e-5) > 1e-5:
+                fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm(1e-5))
                 self.geom_force[s, i] += fb
 
             for j in range(self.ngeom):
@@ -160,8 +160,8 @@ class PushingSimulator:
 
                         # side friction is activated with non-zero tangential velocity and non-breaking contact
                         vt_ij = v_ij - vn_ij   
-                        if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
-                            ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
+                        if vn_ij.norm(1e-5) > 1e-4 and v_ij.dot(n_ij) < -1e-4:
+                            ft = self.mu_s * (fs.norm(1e-5) + fd.norm(1e-5)) * vt_ij / vn_ij.norm(1e-5)
                             self.geom_force[s, i] += ft
                     
     @ti.kernel
@@ -244,14 +244,16 @@ class PushingSimulator:
         #compute body mass and center of mass
         for i in self.composite_geom_id:
             self.body_mass[0] += self.composite.vsize**2 * self.geom_mass[i]
-            # compute the body_qpos, body_qvel, body_rpos, body_rvel
+
+        # compute the body_qpos, body_qvel, body_rpos, body_rvel
+        for i in self.composite_geom_id:
             self.body_qpos[0, 0] += self.composite.vsize**2 * self.geom_mass[i]\
                                          / self.body_mass[0] * self.geom_pos[0, i]
         
         for i in self.composite_geom_id:
             # inertia
             self.body_inertia[0] += self.composite.vsize**2 * self.geom_mass[i] * \
-                                (self.geom_pos[0, i] - self.body_qpos[0, 0]).norm()**2
+                                (self.geom_pos[0, i] - self.body_qpos[0, 0]).norm(1e-5)**2
             # geom_pos0
             self.geom_pos0[i] = self.geom_pos[0, i] - self.body_qpos[0, 0]
             # radius

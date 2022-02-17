@@ -10,7 +10,7 @@ class Defaults:
 
     FPS = 1000
     DT = 1.0 / FPS
-    DTYPE = ti.f32
+    DTYPE = ti.f64
     DEVICE = ti.cpu
 
     def __init__(self):

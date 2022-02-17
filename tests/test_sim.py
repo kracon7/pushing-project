@@ -2,13 +2,13 @@ import os
 import sys
 import numpy as np
 import taichi as ti
-from taichi_pushing.composite_util import Composite2D
-from taichi_pushing.pushing_simulator import PushingSimulator
+from taichi_pushing.physics.composite_util import Composite2D
+from taichi_pushing.physics.pushing_simulator import PushingSimulator
 
 ti.init(arch=ti.cpu, debug=True)
 
 if __name__ == '__main__':
-    composite = Composite2D(5)
+    composite = Composite2D(2)
     sim = PushingSimulator(composite)
 
     sim.composite_mass.from_numpy(composite.mass_dist)
@@ -26,5 +26,3 @@ if __name__ == '__main__':
         sim.compute_ft(s)
         sim.update(s)
         sim.render(s)
-
-        print(sim.body_force[s, 0], sim.body_force[s, 1])
