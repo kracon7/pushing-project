@@ -95,7 +95,7 @@ def remap(coarse, voxel_size, fine):
 
     return np.stack(mapping).astype('int')
 
-object_names = ['hammer', 'drill', 'pan', 'spray_bottle', 'wrench']
+object_names = ['hammer', 'drill', 'pan', 'spray_bottle', 'wrench', 'rod']
 color_bar = ["orange","pink","blue","brown","red","grey","yellow","green"]
 
 poly_coords = {'hammer': np.array([[0., 0.],
@@ -183,7 +183,12 @@ poly_coords = {'hammer': np.array([[0., 0.],
                                    [4, 10],
                                    [4, 0.5],
                                    [3.5, 0]
-                                  ])
+                                  ]),
+               'rod': np.array([[0., 0.],
+                                [8., 0.],
+                                [8., 1.],
+                                [0., 1.]
+                               ])
               }
 gt_mass_dist = {'hammer': [[  0,    0,    2,   9,    2], 
                            [  2,    3,   15,   5,  0.5]],
@@ -194,30 +199,27 @@ gt_mass_dist = {'hammer': [[  0,    0,    2,   9,    2],
                            [6.7, -1.5,   15, 1.5,  0.4]],
                 'spray_bottle': [[0, 0, 6, 7, 1],
                                  [0, 7, 7, 11.5, 0.4]],
-                'wrench': [[0, 0, 6, 14, 2]]
+                'wrench': [[0, 0, 6, 14, 2]],
+                'rod': [[0, 0, 8, 1, 0.5]]
                }
 
 
 class Composite2D():
     """composite 2d object"""
-    def __init__(self, obj_idx, coarse_vsize=0.8, fine_vsize=0.2):
+    def __init__(self, obj_idx, vsize=0.3):
         obj_name = object_names[obj_idx]
         self.polygon = poly_coords[obj_name]
-        self.C = voxelize(poly_coords[obj_name], gt_mass_dist[obj_name], coarse_vsize)
-        self.F = voxelize(poly_coords[obj_name], gt_mass_dist[obj_name], fine_vsize)
-        self.mapping = remap(self.C[:,:2], coarse_vsize, self.F[:,:2])
+        self.C = voxelize(poly_coords[obj_name], gt_mass_dist[obj_name], vsize)
 
-        self.particle_pos0 = self.F[:,:2]
-
-        self.coarse_vsize = coarse_vsize
-        self.fine_vsize = fine_vsize
+        self.particle_pos0 = self.C[:,:2]
+        self.vsize = vsize
         self.num_particle = self.particle_pos0.shape[0]
         self.mass_dim = self.C.shape[0]
         self.mass_dist = self.C[:,2]     # coarse mass distribution
         self.obj_name = obj_name
 
         # actions
-        polygon, polygon_coord, normals = build_exterior_mesh(self.particle_pos0, self.fine_vsize)
+        polygon, polygon_coord, normals = build_exterior_mesh(self.particle_pos0, vsize)
         self.polygon = polygon
         self.polygon_coord = polygon_coord
         self.normals = normals
@@ -235,7 +237,7 @@ class Composite2D():
             start_pos = vtx + hand_radius * nml
 
             count = 0
-            while self.overlap_check(self.polygon_coord, self.fine_vsize, start_pos, hand_radius):
+            while self.overlap_check(self.polygon_coord, self.vsize, start_pos, hand_radius):
                 start_pos += 0.2 * nml
                 count += 1
 

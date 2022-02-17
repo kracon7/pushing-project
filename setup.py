@@ -8,7 +8,6 @@ setup(
     author_email='yuanx320@umn.edu',
     platforms=['any'],
     install_requires=['taichi'],
-    package_dir={"": "src"},
-    packages=find_packages(where="src"),
+    packages=find_packages(),
     python_requires=">=3.6",
 )
