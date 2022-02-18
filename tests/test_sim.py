@@ -14,7 +14,7 @@ if __name__ == '__main__':
     sim.composite_mass.from_numpy(composite.mass_dist)
 
     sim.clear_all()
-    sim.initialize(15)
+    sim.initialize(90)
 
     for s in range(sim.max_step-1):
 
