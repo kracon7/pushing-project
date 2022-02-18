@@ -5,7 +5,7 @@ import taichi as ti
 
 ti.init()
 
-DTYPE = ti.f32
+DTYPE = ti.f64
 
 @ti.data_oriented
 class ExampleClass:
@@ -22,13 +22,11 @@ class ExampleClass:
  
         self.z = ti.Vector.field(2, DTYPE, shape=(), needs_grad=True)
 
-        self.m = ti.field(DTYPE, (), needs_grad=True)
         self.n = ti.field(DTYPE, (), needs_grad=True)
 
     @ti.kernel
     def test(self):
-        self.m[None] += self.x[0]
-        self.z[None] += self.x[0] * self.m[None] * self.y[0, 0]
+        self.z[None] += self.x[0] * self.y[0, 0]
 
         self.n[None] += self.x[0] * (self.y[0, 0] - self.z[None]).norm()**2
         
