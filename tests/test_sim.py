@@ -5,15 +5,16 @@ import taichi as ti
 from taichi_pushing.physics.composite_util import Composite2D
 from taichi_pushing.physics.pushing_simulator import PushingSimulator
 
-ti.init(arch=ti.cpu)
+ti.init(arch=ti.cpu, debug=True)
 
 if __name__ == '__main__':
-    composite = Composite2D(0)
+    composite = Composite2D(2)
     sim = PushingSimulator(composite)
 
-    sim.mass.from_numpy(composite.mass_dist)
+    sim.composite_mass.from_numpy(composite.mass_dist)
 
-    sim.initialize(12)
+    sim.clear_all()
+    sim.initialize(90)
 
     for s in range(sim.max_step-1):
 
@@ -22,9 +23,6 @@ if __name__ == '__main__':
                 exit()
 
         sim.collide(s)
-        # sim.apply_external(s, composite.num_particle, 0, 10000)
         sim.compute_ft(s)
         sim.update(s)
         sim.render(s)
-
-        print(sim.body_force[s, 0], sim.body_force[s, 1])

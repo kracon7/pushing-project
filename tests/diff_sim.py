@@ -6,6 +6,8 @@ from taichi_pushing.physics.composite_util import Composite2D
 from taichi_pushing.physics.pushing_simulator import PushingSimulator
 from taichi_pushing.physics.utils import Defaults
 
+np.random.seed(0)
+
 DTYPE = Defaults.DTYPE
 
 ti.init(arch=ti.cpu, debug=False)
@@ -27,20 +29,18 @@ class Loss():
             self.loss[None] += (self.engines[0].geom_pos[t, i][0] - self.engines[1].geom_pos[t, i][0])**2 + \
                     (self.engines[0].geom_pos[t, i][1] - self.engines[1].geom_pos[t, i][1])**2
 
-
 obj_idx = 0
 composite_est, composite_gt = Composite2D(obj_idx), Composite2D(obj_idx)
 sim_est, sim_gt = PushingSimulator(composite_est), PushingSimulator(composite_gt)
 
-sim_est.mass = ti.field(DTYPE, shape=composite_est.mass_dim, needs_grad=True)
-
-sim_gt.mass.from_numpy(composite_est.mass_dist)
-sim_est.mass.from_numpy(np.random.rand(*composite_est.mass_dist.shape))
+sim_gt.composite_mass.from_numpy(composite_est.mass_dist)
+sim_est.composite_mass.from_numpy(np.random.rand(*composite_est.mass_dist.shape))
+sim_gt.clear_all()
+sim_est.clear_all()
 
 num_particle = composite_est.num_particle
 
 loss = Loss((sim_est, sim_gt))
-
 
 def run_world(sim, action_idx):
     sim.initialize(action_idx)
@@ -58,11 +58,10 @@ def forward():
     run_episode()
     loss.compute_loss(100)
 
-
 with ti.Tape(loss.loss):
     forward()
 
 # forward()
 
 print(loss.loss[None])
-print(sim_est.mass.grad[0], sim_est.mass.grad[1], sim_est.mass.grad[2], sim_est.mass.grad[3], sim_est.mass.grad[4])
+print(sim_est.composite_mass.grad)
