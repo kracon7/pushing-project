@@ -2,8 +2,8 @@ import os
 import sys
 import numpy as np
 import taichi as ti
-from taichi_pushing.composite_util import Composite2D
-from taichi_pushing.pushing_simulator import PushingSimulator
+from taichi_pushing.physics.composite_util import Composite2D
+from taichi_pushing.physics.pushing_simulator import PushingSimulator
 
 ti.init(arch=ti.cpu)
 
