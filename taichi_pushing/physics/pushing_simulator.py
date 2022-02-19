@@ -42,7 +42,10 @@ class PushingSimulator:
         # hand mass
         self.hand_mass = 1e4
         self.hand_inertia = 1e4
+
+        # composite mass and mass mapping
         self.composite_mass = ti.field(DTYPE, composite.mass_dim, needs_grad=True)
+        self.mass_mapping = ti.field(ti.i32, composite.mass_dim)
         self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
 
         # contact parameters
@@ -239,7 +242,7 @@ class PushingSimulator:
         # set geom_pos
         for i in self.composite_geom_id:
             self.geom_pos[0, i] = self.composite_p0[i]
-            self.geom_mass[i] = self.composite_mass[i]
+            self.geom_mass[i] = self.composite_mass[self.mass_mapping[i]]
 
         #compute body mass and center of mass
         for i in self.composite_geom_id:
