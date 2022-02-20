@@ -190,9 +190,9 @@ class PushingSimulator:
 
             # update body qpos and rpos
             self.body_qpos[s+1, i] = self.body_qpos[s, i] + \
-                                     self.dt * self.body_qvel[s+1, i] 
+                                     self.dt * self.body_qvel[s, i] 
             self.body_rpos[s+1, i] = self.body_rpos[s, i] + \
-                                     self.dt * self.body_rvel[s+1, i]
+                                     self.dt * self.body_rvel[s, i]
 
         # print(self.body_qpos[0, 0], self.body_qpos[0,1], self.body_qpos[1, 0], self.body_qpos[1,1],
         #      self.body_qpos[2, 0], self.body_qpos[2,1], '\n===================')
