@@ -24,6 +24,7 @@ class PushingSimulator:
         self.resol_x, self.resol_y = 800, 800
         self.gui = ti.GUI(composite.obj_name, (self.resol_x, self.resol_y))
 
+        self.num_particle = composite.num_particle
         self.ngeom = composite.num_particle + 1
         self.body_id2name = {0: composite.obj_name, 1: 'hand'}
         self.nbody = len(self.body_id2name.keys())
@@ -130,6 +131,31 @@ class PushingSimulator:
             self.body_mass[i] = 0.
             self.body_inertia[i] = 0.
 
+    @ti.kernel
+    def clear_grad(self):
+        for s, i in ti.ndrange(self.max_step, self.ngeom):
+            self.geom_pos.grad[s, i] = [0., 0.]
+            self.geom_vel.grad[s, i] = [0., 0.]
+            self.geom_force.grad[s, i] = [0., 0.]
+
+        for i in range(self.ngeom):
+            self.geom_pos0.grad[i] = [0., 0.]
+            self.geom_mass.grad[i] = 0.
+
+        for s, i in ti.ndrange(self.max_step, self.nbody):
+            self.body_qpos.grad[s, i] = [0., 0.]
+            self.body_qvel.grad[s, i] = [0., 0.]
+            self.body_rpos.grad[s, i] = 0.
+            self.body_rvel.grad[s, i] = 0.
+            self.body_force.grad[s, i] = [0., 0.]
+            self.body_torque.grad[s, i] = 0.
+
+        for i in range(self.nbody):
+            self.body_mass.grad[i] = 0.
+            self.body_inertia.grad[i] = 0.
+
+        for i in range(self.num_particle):
+            self.composite_mass.grad[i] = 0.
 
     @ti.kernel
     def collide(self, s: ti.i32):
