@@ -131,31 +131,31 @@ class PushingSimulator:
             self.body_mass[i] = 0.
             self.body_inertia[i] = 0.
 
-    @ti.kernel
-    def clear_grad(self):
-        for s, i in ti.ndrange(self.max_step, self.ngeom):
-            self.geom_pos.grad[s, i] = [0., 0.]
-            self.geom_vel.grad[s, i] = [0., 0.]
-            self.geom_force.grad[s, i] = [0., 0.]
+    # @ti.kernel
+    # def clear_grad(self):
+    #     for s, i in ti.ndrange(self.max_step, self.ngeom):
+    #         self.geom_pos.grad[s, i] = [0., 0.]
+    #         self.geom_vel.grad[s, i] = [0., 0.]
+    #         self.geom_force.grad[s, i] = [0., 0.]
 
-        for i in range(self.ngeom):
-            self.geom_pos0.grad[i] = [0., 0.]
-            self.geom_mass.grad[i] = 0.
+    #     for i in range(self.ngeom):
+    #         self.geom_pos0.grad[i] = [0., 0.]
+    #         self.geom_mass.grad[i] = 0.
 
-        for s, i in ti.ndrange(self.max_step, self.nbody):
-            self.body_qpos.grad[s, i] = [0., 0.]
-            self.body_qvel.grad[s, i] = [0., 0.]
-            self.body_rpos.grad[s, i] = 0.
-            self.body_rvel.grad[s, i] = 0.
-            self.body_force.grad[s, i] = [0., 0.]
-            self.body_torque.grad[s, i] = 0.
+    #     for s, i in ti.ndrange(self.max_step, self.nbody):
+    #         self.body_qpos.grad[s, i] = [0., 0.]
+    #         self.body_qvel.grad[s, i] = [0., 0.]
+    #         self.body_rpos.grad[s, i] = 0.
+    #         self.body_rvel.grad[s, i] = 0.
+    #         self.body_force.grad[s, i] = [0., 0.]
+    #         self.body_torque.grad[s, i] = 0.
 
-        for i in range(self.nbody):
-            self.body_mass.grad[i] = 0.
-            self.body_inertia.grad[i] = 0.
+    #     for i in range(self.nbody):
+    #         self.body_mass.grad[i] = 0.
+    #         self.body_inertia.grad[i] = 0.
 
-        for i in range(self.num_particle):
-            self.composite_mass.grad[i] = 0.
+    #     for i in range(self.num_particle):
+    #         self.composite_mass.grad[i] = 0.
 
     @ti.kernel
     def collide(self, s: ti.i32):
@@ -187,11 +187,11 @@ class PushingSimulator:
                         fd = self.eta * vn_ij   # damping force
                         self.geom_force[s, i] += fd
 
-                        # side friction is activated with non-zero tangential velocity and non-breaking contact
-                        vt_ij = v_ij - vn_ij   
-                        if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
-                            ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
-                            self.geom_force[s, i] += ft
+                        # # side friction is activated with non-zero tangential velocity and non-breaking contact
+                        # vt_ij = v_ij - vn_ij   
+                        # if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
+                        #     ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
+                        #     self.geom_force[s, i] += ft
                     
     @ti.kernel
     def compute_ft(self, s: ti.i32):

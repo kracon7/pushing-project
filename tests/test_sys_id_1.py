@@ -112,10 +112,10 @@ class ParticleSimulator:
         compute bottom friction force
         '''
         for i in range(self.ngeom):
-            # # bottom friction
-            # if self.geom_vel[s, i].norm() > 1e-5:
-            #     fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
-            #     self.geom_force[s, i] += fb
+            # bottom friction
+            if self.geom_vel[s, i].norm() > 1e-5:
+                fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                self.geom_force[s, i] += fb
 
             for j in range(self.ngeom):
                 if self.geom_body_id[i] != self.geom_body_id[j]:
@@ -128,11 +128,11 @@ class ParticleSimulator:
                         fs = - self.ks * (self.radius[i] + self.radius[j] - r) * n_ij  
                         self.geom_force[s, i] += fs
 
-                        # # relative velocity
-                        # v_ij = self.geom_vel[s, j] - self.geom_vel[s, i]   
-                        # vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
-                        # fd = self.eta * vn_ij   # damping force
-                        # self.geom_force[s, i] += fd
+                        # relative velocity
+                        v_ij = self.geom_vel[s, j] - self.geom_vel[s, i]   
+                        vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
+                        fd = self.eta * vn_ij   # damping force
+                        self.geom_force[s, i] += fd
 
                         # # side friction is activated with non-zero tangential velocity and non-breaking contact
                         # vt_ij = v_ij - vn_ij   
