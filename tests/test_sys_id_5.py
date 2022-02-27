@@ -1,6 +1,6 @@
 '''
 Test for PushingSimulator with contact and bottom friction
-Object assumed to have uniform mass distribution through mass mapping
+Object assumed to have Four regions of mass distribution through mass mapping
 '''
 
 import os
@@ -57,47 +57,32 @@ def forward():
 obj_idx = 0
 composite_est, composite_gt = Composite2D(obj_idx), Composite2D(obj_idx)
 sim_est, sim_gt = PushingSimulator(composite_est), PushingSimulator(composite_gt)
-
-mass_gt = composite_gt.mass_dist
-mass_est = np.random.rand(*composite_est.mass_dist.shape)
+mass_gt = np.ones(*composite_est.mass_dist.shape)
+mass_gt[:4] = np.array([1, 1.5, 2, 2.5]) 
 sim_gt.composite_mass.from_numpy(mass_gt)
-sim_est.composite_mass.from_numpy(mass_est)
-sim_gt.mass_mapping.from_numpy(np.zeros(sim_gt.num_particle))
-sim_est.mass_mapping.from_numpy(np.zeros(sim_gt.num_particle))
+
+# map mass to THREE regions 
+mapping = np.zeros(sim_gt.num_particle)
+mapping[int(sim_gt.num_particle/4):] += 1
+mapping[int(2*sim_gt.num_particle/4):] += 1
+mapping[int(3*sim_gt.num_particle/4):] += 1
+
+sim_gt.mass_mapping.from_numpy(mapping)
+sim_est.mass_mapping.from_numpy(mapping)
 
 loss = Loss((sim_est, sim_gt))
 
-lr = 2e-3
-max_iter = 70
-
-# for i in range(max_iter):
-#     sim_gt.clear_all()
-#     sim_est.clear_all()
-#     loss.clear_loss()
-
-#     # forward sims to compute loss and gradient
-#     with ti.Tape(loss.loss):
-#         forward()
-
-#     print('Iteration %d loss: %12.4f  gt mass:  %16.8f  estimated mass: %16.8f  gradient: %.4f'%(
-#             i, loss.loss[None], mass_gt[0], sim_est.composite_mass[0], sim_est.composite_mass.grad[0]))
-
-#     grad = sim_est.composite_mass.grad
-
-#     # update estimated mass
-#     mass_est[0] -= lr * grad.to_numpy()[0]
-#     sim_est.composite_mass.from_numpy(mass_est)
+lr = 5e-3
+max_iter = 120
 
 traj = []
-h = 8
+h = 5
 for k in range(h):
 
-    mass_gt = composite_gt.mass_dist
     mass_est = 4*np.random.rand(*composite_est.mass_dist.shape)
-    sim_gt.composite_mass.from_numpy(mass_gt)
     sim_est.composite_mass.from_numpy(mass_est)
 
-    temp = [mass_est[0].copy()]
+    temp = [mass_est[:4].copy()]
 
     for i in range(max_iter):
         sim_gt.clear_all()
@@ -114,16 +99,32 @@ for k in range(h):
         grad = sim_est.composite_mass.grad
 
         # update estimated mass
-        mass_est[0] -= lr * grad.to_numpy()[0]
+        mass_est -= lr * grad.to_numpy()
         sim_est.composite_mass.from_numpy(mass_est)
 
-        temp.append(mass_est[0].copy())
+        temp.append(mass_est[:4].copy())
 
-    traj.append(temp)
+    traj.append(np.stack(temp))
+
+
+c = np.array([[207, 40, 30],
+              [255, 143, 133],
+              [102, 0, 162],
+              [72, 0, 141],
+              [0, 162, 132],
+              [90, 228, 165],
+              [241, 255, 74],
+              [240, 225, 0]]).astype('float') / 255
 
 fig, ax = plt.subplots(1,1)
-ax.plot(mass_gt[0]*np.ones(max_iter), linestyle='dashed')
+ax.plot(mass_gt[0]*np.ones(max_iter), color=c[0], linestyle='dashed')
+ax.plot(mass_gt[1]*np.ones(max_iter), color=c[2], linestyle='dashed')
+ax.plot(mass_gt[2]*np.ones(max_iter), color=c[4], linestyle='dashed')
+ax.plot(mass_gt[3]*np.ones(max_iter), color=c[6], linestyle='dashed')
 for i in range(h):
-    ax.plot(traj[i], color='y', alpha=0.3)
+    ax.plot(traj[i][:,0], color=c[1], alpha=0.5)
+    ax.plot(traj[i][:,1], color=c[3], alpha=0.5)
+    ax.plot(traj[i][:,2], color=c[5], alpha=0.5)
+    ax.plot(traj[i][:,3], color=c[7], alpha=0.5)
 
 plt.show()

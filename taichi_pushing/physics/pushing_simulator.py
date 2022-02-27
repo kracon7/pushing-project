@@ -53,7 +53,7 @@ class PushingSimulator:
         self.ks = 1e4
         self.eta = 10
         self.mu_s = 0.1
-        self.mu_b = 0
+        self.mu_b = 0.5
 
         # pos, vel and force of each particle
         self.geom_pos = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
