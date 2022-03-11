@@ -192,6 +192,9 @@ class PushingSimulator:
                         # if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
                         #     ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
                         #     self.geom_force[s, i] += ft
+
+    @ti.kernel
+    def apply_external(self, )
                     
     @ti.kernel
     def compute_ft(self, s: ti.i32):
