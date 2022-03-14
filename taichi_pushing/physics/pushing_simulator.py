@@ -59,6 +59,7 @@ class PushingSimulator:
         self.geom_pos = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
         self.geom_vel = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
         self.geom_force = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
+        self.geom_torque = ti.field(DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
         self.geom_pos0 = ti.Vector.field(2, DTYPE, shape=self.ngeom, needs_grad=True)
  
         self.body_qpos = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.nbody), needs_grad=True)
@@ -114,6 +115,7 @@ class PushingSimulator:
             self.geom_pos[s, i] = [0., 0.]
             self.geom_vel[s, i] = [0., 0.]
             self.geom_force[s, i] = [0., 0.]
+            self.geom_torque[s, i] = 0.
 
         for i in range(self.ngeom):
             self.geom_pos0[i] = [0., 0.]
@@ -194,7 +196,10 @@ class PushingSimulator:
                         #     self.geom_force[s, i] += ft
 
     @ti.kernel
-    def apply_external(self, )
+    def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f64, fy: ti.f64, fw: ti.f64):
+        self.geom_force[s, geom_id][0] += fx
+        self.geom_force[s, geom_id][1] += fy
+        self.geom_torque[s, geom_id] += fw
                     
     @ti.kernel
     def compute_ft(self, s: ti.i32):
@@ -208,6 +213,7 @@ class PushingSimulator:
             self.body_force[s, body_id] += self.geom_force[s, i]
             self.body_torque[s, body_id] += self.cross_2d(self.geom_force[s, i], 
                                                 (self.body_qpos[s, body_id] - self.geom_pos[s, i]))
+            self.body_torque[s, body_id] += self.geom_torque[s, i]
 
     @ti.kernel
     def update(self, s: ti.i32):
