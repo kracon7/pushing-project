@@ -1,7 +1,7 @@
 '''
 Test for PushingSimulator with contact and bottom friction
 Object assumed to have Four regions of mass distribution through mass mapping
-Loss is computed from interactions with random actions 
+Loss is computed from interactions with multiple random actions 
 '''
 
 import os
