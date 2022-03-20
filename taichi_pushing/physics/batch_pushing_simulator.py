@@ -24,7 +24,10 @@ class PushingSimulator:
 
         # render resolution
         self.resol_x, self.resol_y = 800, 800
-        self.gui = ti.GUI(composite.obj_name, (self.resol_x, self.resol_y))
+        self.guis = []
+        for i in range(bs):
+            self.guis.append(ti.GUI(composite.obj_name+'_%d'%i, (self.resol_x, self.resol_y)))
+        # self.gui = ti.GUI(composite.obj_name, (self.resol_x, self.resol_y))
 
         self.num_particle = composite.num_particle
         self.ngeom = composite.num_particle + 1
@@ -114,22 +117,22 @@ class PushingSimulator:
     def clear_all(self):
         # clear force
         for b, s, i in ti.ndrange(self.batch_size, self.max_step, self.ngeom):
-            self.geom_pos[s, i] = [0., 0.]
-            self.geom_vel[s, i] = [0., 0.]
-            self.geom_force[s, i] = [0., 0.]
-            self.geom_torque[s, i] = 0.
+            self.geom_pos[b, s, i] = [0., 0.]
+            self.geom_vel[b, s, i] = [0., 0.]
+            self.geom_force[b, s, i] = [0., 0.]
+            self.geom_torque[b, s, i] = 0.
 
         for i in range(self.ngeom):
             self.geom_pos0[i] = [0., 0.]
             self.geom_mass[i] = 0.
 
         for b, s, i in ti.ndrange(self.batch_size, self.max_step, self.nbody):
-            self.body_qpos[s, i] = [0., 0.]
-            self.body_qvel[s, i] = [0., 0.]
-            self.body_rpos[s, i] = 0.
-            self.body_rvel[s, i] = 0.
-            self.body_force[s, i] = [0., 0.]
-            self.body_torque[s, i] = 0.
+            self.body_qpos[b, s, i] = [0., 0.]
+            self.body_qvel[b, s, i] = [0., 0.]
+            self.body_rpos[b, s, i] = 0.
+            self.body_rvel[b, s, i] = 0.
+            self.body_force[b, s, i] = [0., 0.]
+            self.body_torque[b, s, i] = 0.
 
         for i in range(self.nbody):
             self.body_mass[i] = 0.
@@ -263,8 +266,8 @@ class PushingSimulator:
         self.geom_vel[b, 0, ig][0] = self.hand_vel * action[2]  # vx
         self.geom_vel[b, 0, ig][1] = self.hand_vel * action[3]  # vy
 
-        self.body_qpos[b, 0, ib] = self.geom_pos[0, ig]
-        self.body_qvel[b, 0, ib] = self.geom_vel[0, ig]
+        self.body_qpos[b, 0, ib] = self.geom_pos[b, 0, ig]
+        self.body_qvel[b, 0, ib] = self.geom_vel[b, 0, ig]
         self.body_rpos[b, 0, ib] = 0.
         self.body_rvel[b, 0, ib] = 0.
 
@@ -279,10 +282,11 @@ class PushingSimulator:
     @ti.kernel
     def place_composite(self):
         # set geom_pos
-        for b, i in ti.ndrange(self.batch_size, self.composite_geom_id):
+        for b, i in ti.ndrange(self.batch_size, self.num_particle):
+            # for i in self.composite_geom_id:
             self.geom_pos[b, 0, i] = self.composite_p0[i]
 
-        for i in range(self.composite_geom_id):
+        for i in self.composite_geom_id:
             self.geom_mass[i] = self.composite_mass[self.mass_mapping[i]]
 
         #compute body mass and center of mass
@@ -290,7 +294,8 @@ class PushingSimulator:
             self.body_mass[0] += self.composite.vsize**2 * self.geom_mass[i]
 
         # compute the body_qpos, body_qvel, body_rpos, body_rvel
-        for b, i in ti.ndrange(self.batch_size, self.composite_geom_id):
+        for b, i in ti.ndrange(self.batch_size, self.num_particle):
+            # for i in self.composite_geom_id:
             self.body_qpos[b, 0, 0] += self.composite.vsize**2 * self.geom_mass[i]\
                                          / self.body_mass[0] * self.geom_pos[b, 0, i]
         
@@ -305,19 +310,21 @@ class PushingSimulator:
 
         
     def render(self, s):  # Render the scene on GUI
-        np_pos = self.geom_pos.to_numpy()[s]
-        # print(np_pos[:10])
-        np_pos = (np_pos - np.array([self.wx_min, self.wy_min])) / \
-                 (np.array([self.wx_max-self.wx_min, self.wy_max-self.wy_min]))
+        batch_pos = self.geom_pos.to_numpy()[:, s, :, :]
 
-        # composite object
-        r = self.radius[0] * self.resol_x / (self.wx_max-self.wx_min)
-        idx = self.composite_geom_id.to_numpy()
-        self.gui.circles(np_pos[idx], color=0xffffff, radius=r)
+        for b in range(self.batch_size):
+            np_pos = batch_pos[b]
+            np_pos = (np_pos - np.array([self.wx_min, self.wy_min])) / \
+                     (np.array([self.wx_max-self.wx_min, self.wy_max-self.wy_min]))
 
-        # hand
-        idx = self.hand_geom_id
-        r = self.radius[idx] * self.resol_x / (self.wx_max-self.wx_min)
-        self.gui.circles(np_pos[idx].reshape(1,2), color=0x09ffff, radius=r)
+            # composite object
+            r = self.radius[0] * self.resol_x / (self.wx_max-self.wx_min)
+            idx = self.composite_geom_id.to_numpy()
+            self.guis[b].circles(np_pos[idx], color=0xffffff, radius=r)
 
-        self.gui.show()
+            # hand
+            idx = self.hand_geom_id
+            r = self.radius[idx] * self.resol_x / (self.wx_max-self.wx_min)
+            self.guis[b].circles(np_pos[idx].reshape(1,2), color=0x09ffff, radius=r)
+
+            self.guis[b].show()
