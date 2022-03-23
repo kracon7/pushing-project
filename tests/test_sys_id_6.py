@@ -1,6 +1,6 @@
 '''
-Test for PushingSimulator with contact and bottom friction
-Object assumed to have Four regions of mass distribution through mass mapping
+Test for BatchPushingSimulator with contact and bottom friction
+Object assumed to have uniform mass distribution through mass mapping
 Loss is computed from interactions with multiple random actions 
 '''
 
@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import taichi as ti
 from taichi_pushing.physics.composite_util import Composite2D
-from taichi_pushing.physics.pushing_simulator import PushingSimulator
+from taichi_pushing.physics.batch_pushing_simulator import PushingSimulator
 from taichi_pushing.physics.utils import Defaults
 
 import matplotlib.pyplot as plt
@@ -26,6 +26,8 @@ class Loss():
     def __init__(self, engines):
         self.loss = ti.field(DTYPE, shape=(), needs_grad=True)
         self.engines = engines
+        self.batch_size = engines[0].batch_size
+        self.num_particle = engines[0].num_particle
 
     @ti.kernel
     def clear_loss(self):
@@ -33,11 +35,20 @@ class Loss():
 
     @ti.kernel
     def compute_loss(self, t: ti.i32):
-        for i in sim_est.composite_geom_id:
-            self.loss[None] += (self.engines[0].geom_pos[t, i][0] - self.engines[1].geom_pos[t, i][0])**2 + \
-                    (self.engines[0].geom_pos[t, i][1] - self.engines[1].geom_pos[t, i][1])**2
+        for b, i in ti.ndrange(self.batch_size, self.num_particle):
+            self.loss[None] += \
+                (self.engines[0].geom_pos[b, t, i][0] - self.engines[1].geom_pos[b, t, i][0])**2 + \
+                (self.engines[0].geom_pos[b, t, i][1] - self.engines[1].geom_pos[b, t, i][1])**2
 
 
+
+def render_run_world(sim, action_idx):
+    sim.initialize(action_idx)
+    for s in range(sim.max_step-1):
+        sim.collide(s)
+        sim.compute_ft(s)
+        sim.update(s)
+        sim.render(s)
 
 def run_world(sim, action_idx):
     sim.initialize(action_idx)
@@ -51,26 +62,23 @@ def run_episode(action_idx=10):
     run_world(sim_est, action_idx)
     run_world(sim_gt, action_idx)
 
-def forward():
-    action_idx = np.random.randint(sim_gt.n_actions)
+def forward(action_idx):
     run_episode(action_idx)
     loss.compute_loss(400)
 
 obj_idx = 0
+batch_size = 2
 composite_est, composite_gt = Composite2D(obj_idx), Composite2D(obj_idx)
-sim_est, sim_gt = PushingSimulator(composite_est), PushingSimulator(composite_gt)
-mass_gt = np.ones(*composite_est.mass_dist.shape)
-mass_gt[:4] = np.array([1, 1.5, 2, 2.5]) 
+sim_est, sim_gt = PushingSimulator(composite_est, bs=batch_size), PushingSimulator(composite_gt, bs=batch_size)
+
+mass_gt = composite_gt.mass_dist
+mass_est = np.random.rand(*composite_est.mass_dist.shape)
 sim_gt.composite_mass.from_numpy(mass_gt)
+sim_est.composite_mass.from_numpy(mass_est)
+sim_gt.mass_mapping.from_numpy(np.zeros(sim_gt.num_particle))
+sim_est.mass_mapping.from_numpy(np.zeros(sim_gt.num_particle))
 
-# map mass to THREE regions 
-mapping = np.zeros(sim_gt.num_particle)
-mapping[int(sim_gt.num_particle/4):] += 1
-mapping[int(2*sim_gt.num_particle/4):] += 1
-mapping[int(3*sim_gt.num_particle/4):] += 1
-
-sim_gt.mass_mapping.from_numpy(mapping)
-sim_est.mass_mapping.from_numpy(mapping)
+action_idx = [10, 90]
 
 loss = Loss((sim_est, sim_gt))
 
@@ -93,7 +101,10 @@ for k in range(h):
 
         # forward sims to compute loss and gradient
         with ti.Tape(loss.loss):
-            forward()
+            forward(action_idx)
+
+        # render_run_world(sim_est, action_idx)
+        # render_run_world(sim_gt, action_idx)
 
         print('Iteration %d loss: %12.4f  gt mass:  %16.8f  estimated mass: %16.8f  gradient: %.4f'%(
                 i, loss.loss[None], mass_gt[0], sim_est.composite_mass[0], sim_est.composite_mass.grad[0]))
