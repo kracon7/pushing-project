@@ -1,5 +1,5 @@
 '''
-Composite object rotation by torque
+Composite object rotation by vacuum gripper
 Interactions considered include spring force, damping force and friction force
 '''
 import os
@@ -12,7 +12,7 @@ from .utils import Defaults
 DTYPE = Defaults.DTYPE
 
 @ti.data_oriented
-class PushingSimulator:
+class VacGripSimulator:
     def __init__(self, composite, dt=Defaults.DT):  # Initializer of the pushing environment
         self.dt = dt
         self.max_step = 512
@@ -25,8 +25,8 @@ class PushingSimulator:
         self.gui = ti.GUI(composite.obj_name, (self.resol_x, self.resol_y))
 
         self.num_particle = composite.num_particle
-        self.ngeom = composite.num_particle + 1
-        self.body_id2name = {0: composite.obj_name, 1: 'hand'}
+        self.ngeom = composite.num_particle
+        self.body_id2name = {0: composite.obj_name}
         self.nbody = len(self.body_id2name.keys())
 
         # geom_body_id
@@ -37,12 +37,6 @@ class PushingSimulator:
         # body_geom_id
         self.composite_geom_id = ti.field(ti.i32, shape=composite.num_particle)
         self.composite_geom_id.from_numpy(np.arange(composite.num_particle))
-        self.hand_geom_id = ti.field(ti.i32, shape=())
-        self.hand_geom_id = composite.num_particle
-        
-        # hand mass
-        self.hand_mass = 1e4
-        self.hand_inertia = 1e4
 
         # composite mass and mass mapping
         self.composite_mass = ti.field(DTYPE, composite.mass_dim, needs_grad=True)
@@ -83,15 +77,6 @@ class PushingSimulator:
         self.composite_p0 = ti.Vector.field(2, DTYPE, shape=composite.num_particle)
         for i in range(composite.num_particle):
             self.composite_p0[i] = composite.particle_pos0[i]
-
-        # compute actions for composite in (0., 0.) 0. pose
-        actions = composite.compute_actions(self.hand_radius)
-        self.n_actions = actions['start_pos'].shape[0]
-        self.pushing = ti.Vector.field(4, DTYPE, shape=self.n_actions, needs_grad=True)
-        self.pushing.from_numpy(np.concatenate([actions['start_pos'], actions['direction']], axis=1))
-
-        # hand initial velocity
-        self.hand_vel = 10
 
     @staticmethod
     @ti.func
@@ -160,7 +145,7 @@ class PushingSimulator:
     #         self.composite_mass.grad[i] = 0.
 
     @ti.kernel
-    def collide(self, s: ti.i32):
+    def bottom_friction(self, s: ti.i32):
         '''
         compute particle force based on pair-wise collision
         compute bottom friction force
@@ -171,29 +156,6 @@ class PushingSimulator:
             if self.geom_vel[s, i].norm() > 1e-5:
                 fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
                 self.geom_force[s, i] += fb
-
-            for j in range(self.ngeom):
-                if self.geom_body_id[i] != self.geom_body_id[j]:
-                    pi, pj = self.geom_pos[s, i], self.geom_pos[s, j]
-                    r_ij = pj - pi
-                    r = r_ij.norm()
-                    n_ij = r_ij / r      # normal direction
-                    if (self.radius[i] + self.radius[j] - r) > 0:
-                        # spring force
-                        fs = - self.ks * (self.radius[i] + self.radius[j] - r) * n_ij  
-                        self.geom_force[s, i] += fs
-
-                        # relative velocity
-                        v_ij = self.geom_vel[s, j] - self.geom_vel[s, i]   
-                        vn_ij = v_ij.dot(n_ij) * n_ij  # normal velocity
-                        fd = self.eta * vn_ij   # damping force
-                        self.geom_force[s, i] += fd
-
-                        # # side friction is activated with non-zero tangential velocity and non-breaking contact
-                        # vt_ij = v_ij - vn_ij   
-                        # if vn_ij.norm() > 1e-4 and v_ij.dot(n_ij) < -1e-4:
-                        #     ft = self.mu_s * (fs.norm() + fd.norm()) * vt_ij / vn_ij.norm()
-                        #     self.geom_force[s, i] += ft
 
     @ti.kernel
     def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f64, fy: ti.f64, fw: ti.f64):
