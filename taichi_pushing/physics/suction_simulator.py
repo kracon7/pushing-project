@@ -146,14 +146,9 @@ class VacGripSimulator:
 
     @ti.kernel
     def bottom_friction(self, s: ti.i32):
-        '''
-        compute particle force based on pair-wise collision
-        compute bottom friction force
-        '''
+        # compute bottom friction force
         for i in range(self.ngeom):
-
-            # bottom friction
-            if self.geom_vel[s, i].norm() > 1e-5:
+            if self.geom_vel[s, i].norm() > 1e-8:
                 fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
                 self.geom_force[s, i] += fb
 
