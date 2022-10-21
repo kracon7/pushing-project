@@ -12,7 +12,7 @@ def compute_loss():
     y[None] = ti.sin(x[None])
     loss[None] = y[None] + b[None]
 
-with ti.Tape(loss):
+with ti.ad.Tape(loss):
     compute_loss()
 
 print('dy/dx =', x.grad[None], ' at x =', x[None])

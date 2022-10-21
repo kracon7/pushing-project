@@ -71,11 +71,11 @@ sim_est.mass_mapping.from_numpy(mapping)
 
 loss = Loss((sim_est, sim_gt))
 
-lr = 5e-3
-max_iter = 120
+lr = 8e-3
+max_iter = 80
 
 traj = []
-h = 5
+h = 2
 for k in range(h):
 
     mass_est = 4*np.random.rand(*composite_est.mass_dist.shape)
@@ -101,7 +101,7 @@ for k in range(h):
         mass_est -= lr * grad.to_numpy()
         sim_est.composite_mass.from_numpy(mass_est)
 
-        temp.append(mass_est[:4].copy())
+        temp.append(mass_est[:3].copy())
 
     traj.append(np.stack(temp))
 

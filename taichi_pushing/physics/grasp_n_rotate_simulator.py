@@ -31,10 +31,10 @@ class GraspNRotateSimulator:
 
         # composite mass and mass mapping
         self.composite_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
-        self.mass_mapping = ti.field(ti.i32, self.ngeom)
+        self.mass_mapping = ti.field(ti.i64, self.ngeom)
         self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
 
-        self.composite_geom_id = ti.field(ti.i32, shape=self.ngeom)
+        self.composite_geom_id = ti.field(ti.i64, shape=self.ngeom)
         self.composite_geom_id.from_numpy(np.arange(self.ngeom))
 
         # contact parameters
@@ -138,7 +138,7 @@ class GraspNRotateSimulator:
     #         self.composite_mass.grad[i] = 0.
 
     @ti.kernel
-    def bottom_friction(self, s: ti.i32):
+    def bottom_friction(self, s: ti.i64):
         # compute bottom friction force
         for i in range(self.ngeom):
             if self.geom_vel[s, i].norm() > 1e-8:
@@ -146,13 +146,13 @@ class GraspNRotateSimulator:
                 self.geom_force[s, i] += fb
 
     @ti.kernel
-    def apply_external(self, s: ti.i32, geom_id: ti.i32, fx: ti.f64, fy: ti.f64, fw: ti.f64):
+    def apply_external(self, s: ti.i64, geom_id: ti.i64, fx: ti.f64, fy: ti.f64, fw: ti.f64):
         self.geom_force[s, geom_id][0] += fx
         self.geom_force[s, geom_id][1] += fy
         self.geom_torque[s, geom_id] += fw
                     
     @ti.kernel
-    def compute_ft(self, s: ti.i32):
+    def compute_ft(self, s: ti.i64):
         # compute the force torque on rigid bodies
         for i in range(self.ngeom):
             self.body_force[s] += self.geom_force[s, i]
@@ -161,7 +161,7 @@ class GraspNRotateSimulator:
             self.body_torque[s] += self.geom_torque[s, i]
 
     @ti.kernel
-    def forward_body(self, s: ti.i32):
+    def forward_body(self, s: ti.i64):
         self.body_qvel[s+1] = self.body_qvel[s] + \
                                     self.dt * self.body_force[s] / self.body_mass[None]
         self.body_rvel[s+1] = self.body_rvel[s] + \
@@ -177,7 +177,7 @@ class GraspNRotateSimulator:
         #      self.body_qpos[2, 0], self.body_qpos[2,1], '\n===================')
 
     @ti.kernel
-    def forward_geom(self, s: ti.i32):
+    def forward_geom(self, s: ti.i64):
         for i in range(self.ngeom):
             rot = self.rotation_matrix(self.body_rpos[s+1])
             self.geom_pos[s+1, i] = self.body_qpos[s+1] + rot @ self.geom_pos0[i]
