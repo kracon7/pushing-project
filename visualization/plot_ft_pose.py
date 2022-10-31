@@ -1,7 +1,6 @@
 import os
 import sys
 import argparse
-from turtle import width
 import numpy as np
 import plotly.figure_factory as ff
 import plotly.graph_objects as go

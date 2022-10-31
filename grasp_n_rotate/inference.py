@@ -58,8 +58,7 @@ def rotate_force(force, rmat):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Plot real robot force/torque and pose data')
-    parser.add_argument('--ft', type=str, help='force torque file')
-    parser.add_argument('--pose', type=str, help='pose file file')
+    parser.add_argument('--data', type=str, help='dir for force torque file and pose file')
     args = parser.parse_args()
 
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,35 +78,50 @@ if __name__ == '__main__':
     sim.mass_mapping.from_numpy(mapping)
     
     # Load force torque data
-    ft = np.loadtxt(args.ft, delimiter=',')
-    pose = np.loadtxt(args.pose, delimiter=',')
+    ft = np.loadtxt(os.path.join(args.data, 'ft300s.txt'), delimiter=',')
+    pose = np.loadtxt(os.path.join(args.data, 'pose.txt'), delimiter=',')
     force_interp, torque_interp = time_alignment(ft, pose)
     r_ez, rmat = convert_rotation(pose)
     rotated_fx, rotated_fy = rotate_force(force_interp, rmat)
     rot_origin = pose[0, 1:3]
 
-    # Test auto-differentiation
+    particle_origin_idx = int(np.argmin(np.linalg.norm(
+                                        sim.block_object.particle_coord - rot_origin, 
+                                        axis=1)))
+
+    # Test forward simulation
     sim.clear_all()
-    loss = ti.field(ti.f64, shape=(), needs_grad=True)
-    loss[None] = 0
+    sim.initialize()
+    for s in range(500):
+        sim.bottom_friction(s)
+        sim.apply_external(s, particle_origin_idx, rotated_fx[s], rotated_fy[s], torque_interp[s, 2])
+        sim.compute_ft(s)
+        sim.forward_body(s)
+        sim.forward_geom(s)
+        sim.render(s)
 
-    @ti.kernel
-    def compute_loss():
-        loss[None] = sim.body_qpos[0].norm()**2 + sim.body_rpos[0]**2
+    # # Test auto-differentiation
+    # sim.clear_all()
+    # loss = ti.field(ti.f64, shape=(), needs_grad=True)
+    # loss[None] = 0
 
-    with ti.ad.Tape(loss):
-        sim.initialize()
-        for s in range(20):
-            sim.bottom_friction(s)
-            sim.apply_external(s, 10, 0, 0, 100)
-            sim.compute_ft(s)
-            sim.forward_body(s)
-            sim.forward_geom(s)
+    # @ti.kernel
+    # def compute_loss():
+    #     loss[None] = sim.body_qpos[0].norm()**2 + sim.body_rpos[0]**2
 
-        compute_loss()
+    # with ti.ad.Tape(loss):
+    #     sim.initialize()
+    #     for s in range(20):
+    #         sim.bottom_friction(s)
+    #         sim.apply_external(s, 10, 0, 0, 100)
+    #         sim.compute_ft(s)
+    #         sim.forward_body(s)
+    #         sim.forward_geom(s)
 
-    print('loss: ', loss[None], 
-          " dl/dqx: ", sim.body_qpos.grad.to_numpy()[0],
-          " dl/drx: ", sim.body_rpos.grad.to_numpy()[0],
-          " at qpos: ", sim.body_qpos.to_numpy()[0],
-          " rpos: ", sim.body_rpos.to_numpy()[0])
+    #     compute_loss()
+
+    # print('loss: ', loss[None], 
+    #       " dl/dqx: ", sim.body_qpos.grad.to_numpy()[0],
+    #       " dl/drx: ", sim.body_rpos.grad.to_numpy()[0],
+    #       " at qpos: ", sim.body_qpos.to_numpy()[0],
+    #       " rpos: ", sim.body_rpos.to_numpy()[0])

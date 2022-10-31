@@ -138,7 +138,7 @@ class GraspNRotateSimulator:
     #         self.composite_mass.grad[i] = 0.
 
     @ti.kernel
-    def bottom_friction(self, s: ti.i64):
+    def bottom_friction(self, s: ti.i32):
         # compute bottom friction force
         for i in range(self.ngeom):
             if self.geom_vel[s, i].norm() > 1e-8:
