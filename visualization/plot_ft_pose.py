@@ -56,13 +56,12 @@ def rotate_force(force, rmat):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Plot real robot force/torque and pose data')
-    parser.add_argument('--ft', type=str, help='force torque file')
-    parser.add_argument('--pose', type=str, help='pose file file')
+    parser.add_argument('--data', type=str, help='dir for force torque file and pose file')
     parser.add_argument('--block', type=str, help="block object config file")
     args = parser.parse_args()
 
-    ft = np.loadtxt(args.ft, delimiter=',')
-    pose = np.loadtxt(args.pose, delimiter=',')
+    ft = np.loadtxt(os.path.join(args.data, 'ft300s.txt'), delimiter=',')
+    pose = np.loadtxt(os.path.join(args.data, 'pose.txt'), delimiter=',')
     force_interp, torque_interp = time_alignment(ft, pose)
     r_ez, rmat = convert_rotation(pose)
     rotated_fx, rotated_fy = rotate_force(force_interp, rmat)
