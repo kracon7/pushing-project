@@ -30,9 +30,9 @@ class GraspNRotateSimulator:
         self.nbody = 1
 
         # composite mass and mass mapping
-        self.composite_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
+        self.composite_mass = ti.field(DTYPE, self.ngeom, needs_grad=True) 
         self.mass_mapping = ti.field(ti.i64, self.ngeom)
-        self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
+        self.mass_mapping.from_numpy(self.block_object.mass_mapping)
 
         self.composite_geom_id = ti.field(ti.i64, shape=self.ngeom)
         self.composite_geom_id.from_numpy(np.arange(self.ngeom))
@@ -43,7 +43,8 @@ class GraspNRotateSimulator:
         self.mu_s = 0.1
         self.mu_b = 0.5
 
-        # pos, vel and force of each particle
+        # mass, pos, vel and force of each particle
+        self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
         self.geom_pos = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
         self.geom_vel = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)
         self.geom_force = ti.Vector.field(2, DTYPE, shape=(self.max_step, self.ngeom), needs_grad=True)

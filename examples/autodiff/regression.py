@@ -8,8 +8,6 @@ import taichi as tc
 
 ti.init(arch=ti.cpu)
 
-tc.set_gdb_trigger(True)
-
 number_coeffs = 4
 learning_rate = 1e-4
 
