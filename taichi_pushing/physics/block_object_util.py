@@ -56,8 +56,8 @@ class BlockObject:
                 block_idx = [m_b - i, j]
                 array_idx = [resol * block_idx[0] - (resol // 2) - 1,
                              resol * block_idx[1] + (resol // 2)]
-                print("i: %d, j: %d , array i: %d, j: %d, block i: %d, j: %d"%\
-                        (i, j, array_idx[0], array_idx[1], block_idx[0], block_idx[1]))
+                # print("i: %d, j: %d , array i: %d, j: %d, block i: %d, j: %d"%\
+                        # (i, j, array_idx[0], array_idx[1], block_idx[0], block_idx[1]))
                 if self.shape_array[array_idx[0], array_idx[1]] == 1:
                     for k in range(-(resol // 2), resol // 2 + 1):
                         for l in range(-(resol // 2), resol // 2 + 1):
@@ -71,6 +71,7 @@ class BlockObject:
 
         self.particle_coord = (np.array(coord) + np.array(self.params['offset']))            # particle coord in meter
         self.mass_mapping = np.array(mass_mapping).astype('int')
+        self.friction_mapping = np.array(mass_mapping).astype('int')
 
     def plot(self):
         coord = self.particle_coord

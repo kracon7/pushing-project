@@ -37,11 +37,11 @@ class GraspNRotateSimulator:
         self.composite_geom_id = ti.field(ti.i64, shape=self.ngeom)
         self.composite_geom_id.from_numpy(np.arange(self.ngeom))
 
-        # contact parameters
-        self.ks = 1e4
-        self.eta = 10
-        self.mu_s = 0.1
-        self.mu_b = 0.5
+        # friction coefficient
+        self.composite_friction = ti.field(DTYPE, self.ngeom, needs_grad=True)
+        self.friction_mapping = ti.field(ti.i64, self.ngeom)
+        self.friction_mapping.from_numpy(self.block_object.friction_mapping)
+        self.geom_friction = ti.field(DTYPE, self.ngeom, needs_grad=True)
 
         # mass, pos, vel and force of each particle
         self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
@@ -112,38 +112,12 @@ class GraspNRotateSimulator:
             self.body_mass[None] = 0.
             self.body_inertia[None] = 0.
 
-    # @ti.kernel
-    # def clear_grad(self):
-    #     for s, i in ti.ndrange(self.max_step, self.ngeom):
-    #         self.geom_pos.grad[s, i] = [0., 0.]
-    #         self.geom_vel.grad[s, i] = [0., 0.]
-    #         self.geom_force.grad[s, i] = [0., 0.]
-
-    #     for i in range(self.ngeom):
-    #         self.geom_pos0.grad[i] = [0., 0.]
-    #         self.geom_mass.grad[i] = 0.
-
-    #     for s, i in ti.ndrange(self.max_step, self.nbody):
-    #         self.body_qpos.grad[s, i] = [0., 0.]
-    #         self.body_qvel.grad[s, i] = [0., 0.]
-    #         self.body_rpos.grad[s, i] = 0.
-    #         self.body_rvel.grad[s, i] = 0.
-    #         self.body_force.grad[s, i] = [0., 0.]
-    #         self.body_torque.grad[s, i] = 0.
-
-    #     for i in range(self.nbody):
-    #         self.body_mass.grad[i] = 0.
-    #         self.body_inertia.grad[i] = 0.
-
-    #     for i in range(self.num_particle):
-    #         self.composite_mass.grad[i] = 0.
-
     @ti.kernel
     def bottom_friction(self, s: ti.i32):
         # compute bottom friction force
         for i in range(self.ngeom):
             if self.geom_vel[s, i].norm() > 1e-8:
-                fb = - self.mu_b * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
+                fb = - self.geom_friction[i] * self.geom_mass[i] * (self.geom_vel[s, i] / self.geom_vel[s, i].norm())
                 self.geom_force[s, i] += fb
 
     @ti.kernel
@@ -191,6 +165,7 @@ class GraspNRotateSimulator:
         for i in self.composite_geom_id:
             self.geom_pos[0, i] = self.composite_p0[i]
             self.geom_mass[i] = self.composite_mass[self.mass_mapping[i]]
+            self.geom_friction[i] = self.composite_friction[self.friction_mapping[i]]
 
         #compute body mass and center of mass
         for i in self.composite_geom_id:
