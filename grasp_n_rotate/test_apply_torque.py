@@ -13,10 +13,11 @@ if __name__ == '__main__':
     param_file = os.path.join(ROOT, 'config', 'block_object_param.yaml')
     sim = GraspNRotateSimulator(param_file)
     
-    mass = 0.1*np.ones(sim.block_object.num_particle)
+    mass = 0.1 * np.ones(sim.block_object.num_particle)
     friction = np.ones(sim.block_object.num_particle)
-    mapping = np.zeros(sim.ngeom)
-    u = [[4, 5, 0, 1] for _ in range(SIM_STEPS)]
+    mapping = np.zeros(sim.ngeom).astype('int32')
+    u = {4: [[5, 0, 1] for _ in range(SIM_STEPS)], 
+         5: [[5, 0, 1] for _ in range(SIM_STEPS)]}
 
     sim.input_parameters(mass, mapping, friction, mapping, u)
     
@@ -30,7 +31,10 @@ if __name__ == '__main__':
 
     @ti.kernel
     def compute_loss():
-        loss[None] = 10 * (sim.body_qpos[19].norm()**2 + sim.body_rpos[19]**2)
+        loss[None] = 10 * (sim.body_qpos[4, 19].norm()**2 +
+                            sim.body_rpos[4, 19]**2 + 
+                            sim.body_qpos[5, 19].norm()**2 +
+                            sim.body_rpos[5, 19]**2)
 
     with ti.ad.Tape(loss):
         sim.run(20)

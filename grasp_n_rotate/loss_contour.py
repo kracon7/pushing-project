@@ -38,9 +38,9 @@ if __name__ == '__main__':
     mapping = np.zeros(sim.ngeom)
 
     # Control input
-    u = [[4, 5, 0, 1] for _ in range(100)] + \
-        [[40, 0, 3, 0.5] for _ in range(200)] + \
-        [[10, 1.7, 0, 0.1] for _ in range(200)]
+    u = {4: [[4, 5, 0, 1] for _ in range(100)] + \
+            [[40, 0, 3, 0.5] for _ in range(200)] + \
+            [[10, 1.7, 0, 0.1] for _ in range(200)]}
 
     sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
     
@@ -65,10 +65,10 @@ if __name__ == '__main__':
                 sim.run(SIM_STEPS)
 
                 for idx in loss_steps:
-                    sim.compute_loss(idx, 
-                                    sim_gt.body_qpos[idx][0],
-                                    sim_gt.body_qpos[idx][1], 
-                                    sim_gt.body_rpos[idx])
+                    sim.compute_loss(4, idx, 
+                                    sim_gt.body_qpos[4, idx][0],
+                                    sim_gt.body_qpos[4, idx][1], 
+                                    sim_gt.body_rpos[4, idx])
 
             print('mass: %4f, friction %4f, loss: %.9f, dl/dx: %.5f, %.5f'%(mass[0], friction[0],
                     sim.loss[None], sim.composite_mass.grad.to_numpy()[0],

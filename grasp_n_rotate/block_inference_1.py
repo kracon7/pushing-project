@@ -41,9 +41,7 @@ if __name__ == '__main__':
     mapping = np.zeros(sim.ngeom)
 
     # Control input
-    u = [[4, 5, 0, 1] for _ in range(100)] + \
-        [[40, 0, 3, 0.5] for _ in range(200)] + \
-        [[10, 1.7, 0, 0.1] for _ in range(200)]
+    u = {4: [[2, 0, 1] for _ in range(400)]}
 
     sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
     
@@ -55,8 +53,8 @@ if __name__ == '__main__':
 
     @ti.kernel
     def compute_loss(idx: ti.i64):
-        loss[None] = 10 * (sim.body_qpos[idx] - sim_gt.body_qpos[idx]).norm()**2 + \
-                     (sim.body_rpos[idx] - sim_gt.body_rpos[idx])**2
+        loss[None] = 10 * (sim.body_qpos[4, idx] - sim_gt.body_qpos[4, idx]).norm()**2 + \
+                     (sim.body_rpos[4, idx] - sim_gt.body_rpos[4, idx])**2
 
     trajectories = []
     for ep in range(NUM_EPOCH):
@@ -80,8 +78,8 @@ if __name__ == '__main__':
 
             mass_grad = sim.composite_mass.grad
             friction_grad = sim.composite_friction.grad
-            mass -= 0.0003 * mass_grad.to_numpy()
-            friction -= 0.003 * friction_grad.to_numpy()
+            mass -= 0.000003 * mass_grad.to_numpy()
+            friction -= 0.00003 * friction_grad.to_numpy()
             sim.input_parameters(mass, mapping, friction, mapping, u)
 
         trajectories.append(trajectory)
