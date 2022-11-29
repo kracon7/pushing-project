@@ -44,102 +44,65 @@ if __name__ == '__main__':
 
     sim.mass_mapping.from_numpy(mapping)
     sim_gt.mass_mapping.from_numpy(mapping)
-    
+
+    # Control input
+    u = [[4, 5, 0, 1] for _ in range(SIM_STEPS)]
+ 
+    # Time steps to include in loss computation
+    loss_steps = [100, 200, SIM_STEPS-1]
+       
     # Ground truth forward simulation
     sim_gt.clear_all()
     sim_gt.initialize()
     for s in range(SIM_STEPS):
         sim_gt.bottom_friction(s)
-        sim_gt.apply_external(s, 4, 5, 0, 1)
+        sim_gt.apply_external(s, u[s][0], u[s][1], u[s][2], u[s][3])
         sim_gt.compute_ft(s)
         sim_gt.forward_body(s)
         sim_gt.forward_geom(s)
         sim_gt.render(s)
 
     # Run system id
-    loss = ti.field(ti.f64, shape=(), needs_grad=True)
-    loss_backtrack = ti.field(ti.f64, shape=())
-
-    @ti.kernel
-    def compute_loss(idx: ti.i64):
-        loss[None] = (sim.body_qpos[idx] - sim_gt.body_qpos[idx]).norm()**2 + \
-                     (sim.body_rpos[idx] - sim_gt.body_rpos[idx])**2
-
-    @ti.kernel
-    def compute_loss_backtrack(idx: ti.i64):
-        loss_backtrack[None] = (sim.body_qpos[idx] - sim_gt.body_qpos[idx]).norm()**2 + \
-                               (sim.body_rpos[idx] - sim_gt.body_rpos[idx])**2
-
     trajectories = []
     for ep in range(NUM_EPOCH):
 
         mass = 0.1 + 0.1 * np.random.rand(sim.block_object.num_particle)
-        # mass = 1.0995129742103982 * np.ones(sim.block_object.num_particle)
-        # mass[:4] = np.array([1, 1.5, 2, 2.5]) 
         sim.composite_mass.from_numpy(mass)
 
         trajectory = []
         for iter in range(NUM_ITER):
             trajectory.append(mass[0])
-            loss[None] = 0
-            loss.grad[None] = 0
+            sim.loss[None] = 0
+            sim.loss.grad[None] = 0
 
-            with ti.ad.Tape(loss):
+            with ti.ad.Tape(sim.loss):
                 sim.clear_all()
                 sim.initialize()
                 for s in range(SIM_STEPS):
                     sim.bottom_friction(s)
-                    sim.apply_external(s, 4, 5, 0, 1)
+                    sim.apply_external(s, u[s][0], u[s][1], u[s][2], u[s][3])
                     sim.compute_ft(s)
                     sim.forward_body(s)
                     sim.forward_geom(s)
 
-                compute_loss(SIM_STEPS - 1)
+                for idx in loss_steps:
+                    sim.compute_loss(idx, 
+                                    sim_gt.body_qpos[idx][0],
+                                    sim_gt.body_qpos[idx][1], 
+                                    sim_gt.body_rpos[idx])
 
             print('Ep %4d, Iter %05d, loss: %.9f, dl/dm: %.5f, at m_0: %.5f'%(
-                    ep, iter, loss[None], sim.composite_mass.grad.to_numpy()[0],
+                    ep, iter, sim.loss[None], sim.composite_mass.grad.to_numpy()[0],
                     sim.composite_mass.to_numpy()[0]))
 
             grad = sim.composite_mass.grad.to_numpy()
 
-            # Backtracking line search for step size
-            alpha = 0.05
-            beta = 0.8
-            lr_min = 1e-4      # Minimum step size to terminate backtracking
-            lr = LR              # Initial learning rate
-            while lr >= lr_min:
-                mass_new = mass - lr * grad
-                if (mass_new <= 1e-2).any():
-                    print("Negative mass after update, gradient step is too large!")
-                    lr *= beta
-                    continue
-
-                # Compute f(x')
-                sim.composite_mass.from_numpy(mass_new)
-                sim.clear_all()
-                sim.initialize()
-                for s in range(SIM_STEPS):
-                    sim.bottom_friction(s)
-                    sim.apply_external(s, 4, 5, 0, 1)
-                    sim.compute_ft(s)
-                    sim.forward_body(s)
-                    sim.forward_geom(s)
-                compute_loss_backtrack(SIM_STEPS - 1)
-
-                LHS = loss[None] - loss_backtrack[None]
-                RHS = alpha * lr * np.linalg.norm(grad)**2
-                print("Backtracking search at learning rate %.5f \
-                        loss: %.9f, loss_backtracking: %.9f, right side: %.9f"%\
-                        (lr, loss[None], loss_backtrack[None], RHS))
-                if LHS >= RHS or RHS < 1e-6:
-                    break
-                else:
-                    lr *= beta
+            lr = sim.backtracking(mass, grad, SIM_STEPS, sim_gt, u, loss_steps)
 
             mass -= lr * grad
             sim.composite_mass.from_numpy(mass)
 
-            if abs(loss[None]) < 1e-5:
+            if abs(sim.loss[None]) < 1e-5:
                 break
 
         trajectories.append(trajectory)

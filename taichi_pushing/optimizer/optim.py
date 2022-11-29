@@ -1,6 +1,4 @@
 import numpy as np
-from ..config.utils import make_cls_config
-from yacs.config import CfgNode as CN
 
 class Optimizer:
     def __init__(self, parameters: np.ndarray, cfg=None, **kwargs):

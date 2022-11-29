@@ -6,7 +6,7 @@ from taichi_pushing.physics.grasp_n_rotate_simulator import GraspNRotateSimulato
 
 ti.init(arch=ti.cpu, debug=True)
 
-
+SIM_STEPS = 400
 
 if __name__ == '__main__':
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,24 +14,14 @@ if __name__ == '__main__':
     sim = GraspNRotateSimulator(param_file)
     
     mass = 0.1*np.ones(sim.block_object.num_particle)
-    sim.composite_mass.from_numpy(mass)
     friction = np.ones(sim.block_object.num_particle)
-    sim.composite_friction.from_numpy(friction)
-
     mapping = np.zeros(sim.ngeom)
-    sim.mass_mapping.from_numpy(mapping)
-    sim.friction_mapping.from_numpy(mapping)
+    u = [[4, 5, 0, 1] for _ in range(SIM_STEPS)]
+
+    sim.input_parameters(mass, mapping, friction, mapping, u)
     
     # Test forward simulation
-    sim.clear_all()
-    sim.initialize()
-    for s in range(10):
-        sim.bottom_friction(s)
-        sim.apply_external(s, 10, 0, 0, 100)
-        sim.compute_ft(s)
-        sim.forward_body(s)
-        sim.forward_geom(s)
-        sim.render(s)
+    sim.run(SIM_STEPS)
 
     # Test auto-differentiation
     sim.clear_all()
@@ -40,21 +30,12 @@ if __name__ == '__main__':
 
     @ti.kernel
     def compute_loss():
-        loss[None] = sim.body_qpos[19].norm()**2 + sim.body_rpos[19]**2
+        loss[None] = 10 * (sim.body_qpos[19].norm()**2 + sim.body_rpos[19]**2)
 
     with ti.ad.Tape(loss):
-        sim.initialize()
-        for s in range(20):
-            sim.bottom_friction(s)
-            sim.apply_external(s, 10, 0, 0, 100)
-            sim.compute_ft(s)
-            sim.forward_body(s)
-            sim.forward_geom(s)
-
+        sim.run(20)
         compute_loss()
 
-    print('loss: ', loss[None], 
-          " dl/dqx: ", sim.body_qpos.grad.to_numpy()[0],
-          " dl/drx: ", sim.body_rpos.grad.to_numpy()[0],
-          " at qpos: ", sim.body_qpos.to_numpy()[0],
-          " rpos: ", sim.body_rpos.to_numpy()[0])
+    print('loss: %.9f, dl/dm: %.5f, at m_0: %.5f, dl/dmu: %.5f, at mu_0: %.5f '%(
+           loss[None], sim.composite_mass.grad.to_numpy()[0], sim.composite_mass.to_numpy()[0], 
+           sim.composite_friction.grad.to_numpy()[0], sim.composite_friction.to_numpy()[0]))
