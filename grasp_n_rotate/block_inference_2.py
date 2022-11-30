@@ -22,7 +22,7 @@ from math import sin, cos
 
 NUM_EPOCH = 1
 NUM_ITER = 200
-SIM_STEPS = 400
+SIM_STEPS = 50
 LR = 0.01
 
 ti.init(arch=ti.cpu, debug=True)
@@ -54,10 +54,10 @@ if __name__ == '__main__':
     sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
 
     # Time steps to include in loss computation
-    loss_steps = [50, 100, 150, 200, 250, SIM_STEPS-1]
+    loss_steps = [SIM_STEPS-1]
         
     # Ground truth forward simulation
-    sim_gt.run(SIM_STEPS)
+    sim_gt.run(SIM_STEPS, render=True)
 
     # Compute and plot the loss contour
     state_space = np.meshgrid(np.linspace(0.08, 0.13, 26), np.linspace(0.08, 0.13, 26), indexing='ij')

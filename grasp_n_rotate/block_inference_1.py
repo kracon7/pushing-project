@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 NUM_EPOCH = 5
 NUM_ITER = 100
-SIM_STEPS = 400
+SIM_STEPS = 50
 
 ti.init(arch=ti.cpu, debug=True)
 
@@ -46,7 +46,7 @@ if __name__ == '__main__':
     sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
     
     # Ground truth forward simulation
-    sim_gt.run(SIM_STEPS)
+    sim_gt.run(SIM_STEPS, render=True)
 
     # Run system id
     loss = ti.field(ti.f64, shape=(), needs_grad=True)
@@ -61,6 +61,7 @@ if __name__ == '__main__':
 
         mass = 0.1 + 0.1 * np.random.rand(sim.block_object.num_particle)
         friction = 0.5 + 0.5 * np.random.rand(sim.block_object.num_particle)
+        friction = friction_gt
         sim.input_parameters(mass, mapping, friction, mapping, u)
 
         trajectory = []
@@ -78,7 +79,7 @@ if __name__ == '__main__':
 
             mass_grad = sim.composite_mass.grad
             friction_grad = sim.composite_friction.grad
-            mass -= 0.000003 * mass_grad.to_numpy()
+            mass -= 0.0003 * mass_grad.to_numpy()
             friction -= 0.00003 * friction_grad.to_numpy()
             sim.input_parameters(mass, mapping, friction, mapping, u)
 

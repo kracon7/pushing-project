@@ -235,7 +235,24 @@ class GraspNRotateSimulator:
         self.friction_mapping.from_numpy(friction_mapping)
         self.u = u
 
-    def run(self, sim_steps):
+    def update_parameter(self, param, param_name):
+        if param_name == "mass":
+            self.composite_mass.from_numpy(param)
+        elif param_name == "friction":
+            self.composite_friction.from_numpy(param)
+        else:
+            raise Exception("Unknown parameter type")
+
+    def get_parameter(self, param_name):
+        if param_name == "mass":
+            param = self.composite_mass.to_numpy()
+        elif param_name == "friction":
+            param = self.composite_friction.to_numpy()
+        else:
+            raise Exception("Unknown parameter type")
+        return param
+
+    def run(self, sim_steps, render=False):
         for k in self.u:
             if sim_steps > len(self.u[k]):
                 raise Exception("Undefined control input on particle %d, sim steps too long"%k)
@@ -249,6 +266,9 @@ class GraspNRotateSimulator:
                 self.compute_ft(k, s)
                 self.forward_body(k, s)
                 self.forward_geom(k, s)
+
+                if render:
+                    self.render(k, s)
 
     def backtracking(self, mass, grad, sim_steps, sim_gt, u, loss_steps, 
                            alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-4):

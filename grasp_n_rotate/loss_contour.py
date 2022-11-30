@@ -18,7 +18,7 @@ from taichi_pushing.physics.grasp_n_rotate_simulator import GraspNRotateSimulato
 from taichi_pushing.physics.utils import Defaults
 import matplotlib.pyplot as plt
 
-SIM_STEPS = 400
+SIM_STEPS = 50
 
 ti.init(arch=ti.cpu, debug=True)
 
@@ -38,17 +38,17 @@ if __name__ == '__main__':
     mapping = np.zeros(sim.ngeom)
 
     # Control input
-    u = {4: [[4, 5, 0, 1] for _ in range(100)] + \
-            [[40, 0, 3, 0.5] for _ in range(200)] + \
-            [[10, 1.7, 0, 0.1] for _ in range(200)]}
+    u = {4: [[10, 0, 1.5] for _ in range(60)],
+         40: [[0, -10, -1.5] for _ in range(60)],
+         15: [[-10, 0, 0.5] for _ in range(60)]}
 
     sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
     
     # Ground truth forward simulation
-    sim_gt.run(SIM_STEPS)
+    sim_gt.run(SIM_STEPS, render=True)
 
     # Time steps to include in loss computation
-    loss_steps = [50, 100, 150, 200, 250, SIM_STEPS-1]
+    loss_steps = [SIM_STEPS-1]
 
     state_space = np.meshgrid(np.linspace(0.08, 0.12, 17), np.linspace(0.2, 0.8, 25), indexing='ij')
     n1, n2 = state_space[0].shape
@@ -64,11 +64,12 @@ if __name__ == '__main__':
             with ti.ad.Tape(sim.loss):
                 sim.run(SIM_STEPS)
 
-                for idx in loss_steps:
-                    sim.compute_loss(4, idx, 
-                                    sim_gt.body_qpos[4, idx][0],
-                                    sim_gt.body_qpos[4, idx][1], 
-                                    sim_gt.body_rpos[4, idx])
+                for b in u.keys():
+                    for idx in loss_steps:
+                        sim.compute_loss(b, idx, 
+                                        sim_gt.body_qpos[b, idx][0],
+                                        sim_gt.body_qpos[b, idx][1], 
+                                        sim_gt.body_rpos[b, idx])
 
             print('mass: %4f, friction %4f, loss: %.9f, dl/dx: %.5f, %.5f'%(mass[0], friction[0],
                     sim.loss[None], sim.composite_mass.grad.to_numpy()[0],
@@ -109,9 +110,8 @@ if __name__ == '__main__':
         dx=0.025,
         contours=dict(
             start=0,
-            end=4500,
-            size=30,
+            end=5,
+            size=0.01,
         ),
     ))
-    fig.add_trace(go.Scatter(x=[0.3, 0.4, 0.5], y=[0.09, 0.1, 0.11]))
     fig.show()
