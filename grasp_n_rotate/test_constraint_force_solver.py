@@ -11,7 +11,7 @@ from taichi_pushing.physics.utils import Defaults
 import matplotlib.pyplot as plt
 
 NUM_EPOCH = 5
-NUM_ITER = 100
+NUM_ITER = 200
 SIM_STEP = 50
 
 ti.init(arch=ti.cpu, debug=True)
@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     constraint_solver.input_parameters(mass, mapping, friction, mapping, force, torque)
 
-    optim = Momentum(force, lr=100000, bounds=[-100, 100], momentum=0.8)
+    optim = Momentum(force, lr=1000000, bounds=[-100, 100], momentum=0.8)
 
     for i in range(NUM_ITER):
         with ti.ad.Tape(constraint_solver.loss):

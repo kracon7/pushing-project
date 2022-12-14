@@ -197,6 +197,10 @@ class ConstraintForceSolver:
     def add_loss(self, b: ti.i32, s: ti.i32):
         self.loss[None] += (self.geom_pos[b, s, b][0] - self.geom_pos[b, s+1, b][0])**2 + \
                             (self.geom_pos[b, s, b][1] - self.geom_pos[b, s+1, b][1])**2
+
+    @ti.kernel
+    def average_loss(self, n: ti.f64):
+        self.loss[None] /= n
          
     def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
@@ -271,6 +275,10 @@ class ConstraintForceSolver:
                     self.render(b, s)
 
     def compute_loss(self, batch):
+        n = 0
         for b in batch:
             for s in range(self.sim_step):
                 self.add_loss(b, s)
+                n += 1
+
+        self.average_loss(n)
