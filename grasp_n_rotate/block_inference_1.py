@@ -15,6 +15,7 @@ import numpy as np
 import taichi as ti
 from scipy.spatial.transform import Rotation
 from taichi_pushing.physics.grasp_n_rotate_simulator import GraspNRotateSimulator
+from taichi_pushing.optimizer.optim import Backtracking, BacktrackingMomentum
 from taichi_pushing.physics.utils import Defaults
 import matplotlib.pyplot as plt
 
@@ -23,6 +24,7 @@ NUM_ITER = 100
 SIM_STEPS = 50
 
 ti.init(arch=ti.cpu, debug=True)
+np.random.seed(0)
 
 if __name__ == '__main__':
 
@@ -41,47 +43,53 @@ if __name__ == '__main__':
     mapping = np.zeros(sim.ngeom)
 
     # Control input
-    u = {4: [[2, 0, 1] for _ in range(400)]}
+    u = {4: [[10, 0, 1.5] for _ in range(60)],
+         40: [[0, -10, -1.5] for _ in range(60)],
+         15: [[-10, 0, 0.5] for _ in range(60)]}
 
-    sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u)
+    # Time steps to include in loss computation
+    loss_steps = [SIM_STEPS-1]
+
+    sim_gt.input_parameters(mass_gt, mapping, friction_gt, mapping, u, loss_steps)
     
     # Ground truth forward simulation
     sim_gt.run(SIM_STEPS, render=True)
-
-    # Run system id
-    loss = ti.field(ti.f64, shape=(), needs_grad=True)
-
-    @ti.kernel
-    def compute_loss(idx: ti.i64):
-        loss[None] = 10 * (sim.body_qpos[4, idx] - sim_gt.body_qpos[4, idx]).norm()**2 + \
-                     (sim.body_rpos[4, idx] - sim_gt.body_rpos[4, idx])**2
+    body_poses_gt = np.concatenate([sim_gt.body_qpos.to_numpy(),
+                                np.expand_dims(sim_gt.body_rpos.to_numpy(), axis=-1)], axis=2)
 
     trajectories = []
     for ep in range(NUM_EPOCH):
 
         mass = 0.1 + 0.1 * np.random.rand(sim.block_object.num_particle)
-        friction = 0.5 + 0.5 * np.random.rand(sim.block_object.num_particle)
-        friction = friction_gt
-        sim.input_parameters(mass, mapping, friction, mapping, u)
+        # friction = 0.5 + 0.5 * np.random.rand(sim.block_object.num_particle)
+        friction = friction_gt.copy()
+        sim.input_parameters(mass, mapping, friction, mapping, u, loss_steps)
+
+        # x = {"mass": mass, "friction": friction}
+        # bounds = {"mass": [0.005, 0.3], "friction": [0.05, 1]}
+        x = {"mass": mass}
+        bounds = {"mass": [0.005, 0.3]}
+        optim = BacktrackingMomentum(x, bounds, body_poses_gt, momentum=0.5)
 
         trajectory = []
         for iter in range(NUM_ITER):
             trajectory.append(mass[0])
 
-            with ti.ad.Tape(loss):
+            with ti.ad.Tape(sim.loss):
                 sim.run(SIM_STEPS)
-                compute_loss(SIM_STEPS - 1)
+                sim.compute_loss(body_poses_gt)
 
             print('Ep %4d, Iter %05d, loss: %.9f, dl/dm: %.5f, at m_0: %.5f, dl/dmu: %.5f, at mu_0: %.5f '%(
-                    ep, iter, loss[None], sim.composite_mass.grad.to_numpy()[0],
+                    ep, iter, sim.loss[None], sim.composite_mass.grad.to_numpy()[0],
                     sim.composite_mass.to_numpy()[0], sim.composite_friction.grad.to_numpy()[0],
                     sim.composite_friction.to_numpy()[0]))
 
-            mass_grad = sim.composite_mass.grad
-            friction_grad = sim.composite_friction.grad
-            mass -= 0.0003 * mass_grad.to_numpy()
-            friction -= 0.00003 * friction_grad.to_numpy()
-            sim.input_parameters(mass, mapping, friction, mapping, u)
+            # grads = {"mass": sim.composite_mass.grad.to_numpy(),
+            #          "friction": sim.composite_friction.grad.to_numpy()}
+            grads = {"mass": sim.composite_mass.grad.to_numpy()}                     
+            x = optim.step(sim, grads)
+
+            sim.input_parameters(x["mass"], mapping, friction, mapping, u, loss_steps)
 
         trajectories.append(trajectory)
 

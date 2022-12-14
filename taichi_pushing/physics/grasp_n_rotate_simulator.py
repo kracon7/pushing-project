@@ -14,10 +14,10 @@ DTYPE = Defaults.DTYPE
 
 @ti.data_oriented
 class GraspNRotateSimulator:
-    def __init__(self, param_file, dt=Defaults.DT):  # Initializer of the simulator environment
+    def __init__(self, param_file, max_step=100, dt=Defaults.DT):  # Initializer of the simulator environment
         self.block_object = BlockObject(param_file)
         self.dt = dt
-        self.max_step = 512
+        self.max_step = max_step
 
         # world bound
         self.wx_min, self.wx_max, self.wy_min, self.wy_max = 0.05, 0.65, -0.3, 0.3
@@ -119,7 +119,7 @@ class GraspNRotateSimulator:
     def bottom_friction(self, b: ti.i32, s: ti.i32):
         # compute bottom friction force
         for i in range(self.ngeom):
-            if self.geom_vel[b, s, i].norm() > 1e-8:
+            if self.geom_vel[b, s, i].norm() > 1e-6:
                 fb = - self.geom_friction[i] * self.geom_mass[i] * (self.geom_vel[b, s, i] / self.geom_vel[b, s, i].norm())
                 self.geom_force[b, s, i] += fb
 
@@ -189,16 +189,24 @@ class GraspNRotateSimulator:
             self.radius[i] = self.block_object.voxel_size / 2
 
     @ti.kernel
-    def compute_loss(self, b: ti.i32, idx: ti.i32, px: ti.f64, py: ti.f64, pw: ti.f64):
-        self.loss[None] += (self.body_qpos[b, idx][0] - px)**2 + \
-                           (self.body_qpos[b, idx][1] - py)**2 + \
-                           (self.body_rpos[b, idx] - pw)**2
+    def add_loss(self, b: ti.i32, s: ti.i32, px: ti.f64, py: ti.f64, pw: ti.f64):
+        self.loss[None] += (self.body_qpos[b, s][0] - px)**2 + \
+                           (self.body_qpos[b, s][1] - py)**2 + \
+                           (self.body_rpos[b, s] - pw)**2
 
     @ti.kernel
-    def compute_loss_backtrack(self, b: ti.i32, idx: ti.i64, px: ti.f64, py: ti.f64, pw: ti.f64):
-        self.loss_backtrack[None] += (self.body_qpos[b, idx][0] - px)**2 + \
-                                     (self.body_qpos[b, idx][1] - py)**2 + \
-                                     (self.body_rpos[b, idx] - pw)**2                 
+    def average_loss(self, n: ti.f64):
+        self.loss[None] /= n
+
+    @ti.kernel
+    def add_loss_backtrack(self, b: ti.i32, s: ti.i64, px: ti.f64, py: ti.f64, pw: ti.f64):
+        self.loss_backtrack[None] += (self.body_qpos[b, s][0] - px)**2 + \
+                                     (self.body_qpos[b, s][1] - py)**2 + \
+                                     (self.body_rpos[b, s] - pw)**2
+
+    @ti.kernel
+    def average_loss_backtrack(self, n: ti.f64):
+        self.loss_backtrack[None] /= n            
          
     def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
@@ -213,27 +221,31 @@ class GraspNRotateSimulator:
 
         self.gui.show()
 
-    def input_parameters(self, mass, mass_mapping, friction, friction_mapping, u):
+    def input_parameters(self, mass, mass_mapping, friction, friction_mapping, u, 
+                                loss_steps):
         '''
         Set up simulation environment including mass, friction and control input u
         Args:
             mass -- (ngeom, ) ndarray, 
-                    ground truth mass vector, usually only the first few
-                    are mapped to the composite_mass
+                ground truth mass vector, usually only the first few
+                are mapped to the composite_mass
             mass_mapping -- (ngeom, ) ndarray, 
-                            mapping to composite mass
+                mapping to composite mass
             friction -- (ngeom, ) ndarray, 
-                        ground truth friction vector, similar to "mass"
+                ground truth friction vector, similar to "mass"
             friction_mapping -- (ngeom, ) ndarray, 
-                                similar to "mass_mapping"
+                similar to "mass_mapping"
             u -- dict, 
-                 Control input. {particle_idx: list of [fx, fy, fw]}
+                Control input. {particle_idx: list of [fx, fy, fw]}
+            loss_steps -- list,
+                Time steps to accumulate loss
         '''
         self.composite_mass.from_numpy(mass)
         self.mass_mapping.from_numpy(mass_mapping)
         self.composite_friction.from_numpy(friction)
         self.friction_mapping.from_numpy(friction_mapping)
         self.u = u
+        self.loss_steps = loss_steps
 
     def update_parameter(self, param, param_name):
         if param_name == "mass":
@@ -270,63 +282,23 @@ class GraspNRotateSimulator:
                 if render:
                     self.render(k, s)
 
-    def backtracking(self, mass, grad, sim_steps, sim_gt, u, loss_steps, 
-                           alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-4):
-        '''
-        Backtracking line search for step size
-        Args:
-            mass -- numpy array of the current mass
-            grad -- gradient at the current mass
-            sim_steps -- number of simulation steps
-            sim_gt -- ground truth results
-            u -- control input list of [particle index, fx, fy, fw]
-            loss_steps -- list of the timesteps added to loss computation
-            alpha -- backtracking hypermeter
-            beta -- backtracking step update ratio
-            lr_0 -- step size at the beginning of search
-            lr_min -- minimum step size to terminate the search
-        Return:
-            lr -- optimal step size
-        '''
-        
-        lr = lr_0              # Initial learning rate
-        loss_prev = 1e9        # 
+    def compute_loss(self, body_poses_gt):
+        n = 0
+        for b in self.u.keys():
+            for s in self.loss_steps:
+                self.add_loss(b, s, 
+                                body_poses_gt[b, s][0],
+                                body_poses_gt[b, s][1], 
+                                body_poses_gt[b, ][2])
+                n += 1
+        self.average_loss(n)
 
-        while lr >= lr_min:
-            mass_new = mass - lr * grad
-            if (mass_new <= 1e-2).any():
-                print("Negative mass after update, gradient step is too large!")
-                lr *= beta
-                continue
-
-            # Compute f(x')
-            self.composite_mass.from_numpy(mass_new)
-
-            self.loss_backtrack[None] = 0
-            self.clear_all()
-            self.initialize()
-            for s in range(sim_steps):
-                self.bottom_friction(s)
-                self.apply_external(s, u[s][0], u[s][1], u[s][2], u[s][3])
-                self.compute_ft(s)
-                self.forward_body(s)
-                self.forward_geom(s)
-            
-            for idx in loss_steps:
-                self.compute_loss_backtrack(idx, 
-                                            sim_gt.body_qpos[idx][0],
-                                            sim_gt.body_qpos[idx][1], 
-                                            sim_gt.body_rpos[idx])
-
-            if self.loss[None] > self.loss_backtrack[None] and \
-                                    self.loss_backtrack[None] > loss_prev:
-                break
-            else:
-                lr *= beta
-
-            loss_prev = self.loss_backtrack[None]
-            print("Backtracking search at learning rate %.7f \
-                    loss: %.9f, loss_backtracking: %.9f"%\
-                    (lr, self.loss[None], self.loss_backtrack[None]))
-        
-        return lr
+    def compute_loss_backtrack(self, body_poses_gt):
+        n = 0
+        for b in self.u.keys():
+            for s in self.loss_steps:
+                self.add_loss_backtrack(b, s, 
+                                body_poses_gt[b, s][0],
+                                body_poses_gt[b, s][1], 
+                                body_poses_gt[b, s][2])
+        self.average_loss_backtrack(n)

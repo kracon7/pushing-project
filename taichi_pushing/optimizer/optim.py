@@ -67,12 +67,90 @@ class Adam(Optimizer):
         cfg.epsilon = 1e-8
         return cfg
 
+class BacktrackingMomentum:
+    def __init__(self, parameters, bounds, body_poses_gt, momentum=0.7, alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-6):
+        '''
+        Momentum optimizer with backtracking line search for step size
+        Args:
+            parameters -- Dictionary, {param_name: ndarray}
+            bounds -- Dictionary, {param_name: [lower_bound, upper_bound]}
+            momentum -- hyperparameter
+        '''
+        self.parameters = parameters
+        self.bounds = bounds
+        self.momentum = momentum
+        self.momentum_buffer = {k: np.zeros_like(v) for (k, v) in parameters.items()}
+        self.body_poses_gt = body_poses_gt
+        self.alpha = alpha
+        self.beta = beta
+        self.lr_0 = lr_0
+        self.lr_min = lr_min
+
+    def step(self, sim, grads):
+        grads_new = {k: self.momentum_buffer[k] * self.momentum + v * (1 - self.momentum) 
+                for (k, v) in grads.items()}
+        self.momentum_buffer = grads_new
+        
+        # line search for step size
+        lr = self.line_search(sim, grads_new)
+
+        # update parameters
+        self.parameters = {k: (v - lr * grads_new[k]).clip(*self.bounds[k])
+                        for (k, v) in self.parameters.items()}
+
+        return self.parameters.copy()
+
+    def line_search(self, sim, grads):
+        lr = self.lr_0              # Initial learning rate
+        loss_prev = 1e9         
+        sim_steps = max(sim.loss_steps) + 1
+
+        params = {k: sim.get_parameter(k) for (k, v) in grads.items()}
+
+        # print("Line search direction: %.5f, %.5f"%(grads["mass"][0], grads["friction"][0]))
+
+        while lr >= self.lr_min:
+            params_new = {k: v - lr * grads[k] for (k, v) in params.items()}
+            if not self.check_bounds(params_new):
+                # print("Parameters out of bounds after update, gradient step is too large!")
+                lr *= self.beta
+                continue
+            
+            # Update sim parameters
+            for k, v in params_new.items():
+                sim.update_parameter(v, k)
+
+            sim.loss_backtrack[None] = 0
+            sim.run(sim_steps)
+            sim.compute_loss_backtrack(self.body_poses_gt)
+
+            if sim.loss[None] > sim.loss_backtrack[None] and \
+                                    sim.loss_backtrack[None] > loss_prev:
+                break
+            else:
+                lr *= self.beta
+
+            loss_prev = sim.loss_backtrack[None]
+            # print("Backtracking search at learning rate %.7f \
+            #         loss: %.9f, loss_backtracking: %.9f"%\
+            #         (lr, sim.loss[None], sim.loss_backtrack[None]))
+        
+        return lr
+
+    def check_bounds(self, parameters):
+        for k, v in parameters.items():
+            if (v < self.bounds[k][0]).any() or (v > self.bounds[k][1]).any():
+                return False
+            else:
+                return True
+
+
 class Backtracking:
-    def __init__(self, gt_trajectory, param_name, alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-4):
+    def __init__(self, body_poses_gt, param_name, alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-6):
         '''
         Backtracking line search for step size
         Args:
-            gt_trajectory -- ndarray (batch, timestep, 3, ).
+            body_poses_gt -- ndarray (batch, timestep, 3, ).
                              Ground truth body qpos and body rpos
             param_type -- string, 
                           "mass" or "friction"
@@ -82,14 +160,14 @@ class Backtracking:
         Return:
             lr -- optimal step size
         '''
-        self.gt_trajectory = gt_trajectory
+        self.body_poses_gt = body_poses_gt
         self.param_name = param_name
         self.alpha = alpha
         self.beta = beta
         self.lr_0 = lr_0
         self.lr_min = lr_min
 
-    def backtracking(self, sim, grad, sim_steps, loss_steps):
+    def line_search(self, sim, grad, sim_steps, loss_steps):
         '''
         Backtracking line search for step size
         Args:
@@ -119,13 +197,7 @@ class Backtracking:
 
             sim.loss_backtrack[None] = 0
             sim.run(sim_steps)
-
-            for b in sim.u.keys():
-                for idx in loss_steps:
-                    sim.compute_loss_backtrack(b, idx, 
-                                    self.gt_trajectory[b, idx][0],
-                                    self.gt_trajectory[b, idx][1], 
-                                    self.gt_trajectory[b, idx][2])
+            sim.compute_loss_backtrack(self.body_poses_gt)
 
             if sim.loss[None] > sim.loss_backtrack[None] and \
                                     sim.loss_backtrack[None] > loss_prev:
