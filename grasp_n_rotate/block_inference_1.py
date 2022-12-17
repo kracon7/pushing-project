@@ -43,9 +43,9 @@ if __name__ == '__main__':
     mapping = np.zeros(sim.ngeom)
 
     # Control input
-    u = {4: [[10, 0, 1.5] for _ in range(60)],
-         40: [[0, -10, -1.5] for _ in range(60)],
-         15: [[-10, 0, 0.5] for _ in range(60)]}
+    u = {4: [[10, 0, 5] for _ in range(60)],
+         40: [[0, -10, -5] for _ in range(60)],
+         15: [[-10, 0, 5] for _ in range(60)]}
 
     # Time steps to include in loss computation
     loss_steps = [SIM_STEPS-1]
@@ -54,8 +54,7 @@ if __name__ == '__main__':
     
     # Ground truth forward simulation
     sim_gt.run(SIM_STEPS, render=True)
-    body_poses_gt = np.concatenate([sim_gt.body_qpos.to_numpy(),
-                                np.expand_dims(sim_gt.body_rpos.to_numpy(), axis=-1)], axis=2)
+    geom_pos_gt = sim_gt.geom_pos.to_numpy()
 
     trajectories = []
     for ep in range(NUM_EPOCH):
@@ -69,15 +68,16 @@ if __name__ == '__main__':
         # bounds = {"mass": [0.005, 0.3], "friction": [0.05, 1]}
         x = {"mass": mass}
         bounds = {"mass": [0.005, 0.3]}
-        optim = BacktrackingMomentum(x, bounds, body_poses_gt, momentum=0.5)
+        optim = BacktrackingMomentum(x, bounds, geom_pos_gt, momentum=0.5)
 
         trajectory = []
         for iter in range(NUM_ITER):
             trajectory.append(mass[0])
 
+            ti.ad.clear_all_gradients()
             with ti.ad.Tape(sim.loss):
                 sim.run(SIM_STEPS)
-                sim.compute_loss(body_poses_gt)
+                sim.compute_loss(geom_pos_gt)
 
             print('Ep %4d, Iter %05d, loss: %.9f, dl/dm: %.5f, at m_0: %.5f, dl/dmu: %.5f, at mu_0: %.5f '%(
                     ep, iter, sim.loss[None], sim.composite_mass.grad.to_numpy()[0],

@@ -75,6 +75,9 @@ class GraspNRotateSimulator:
         self.loss = ti.field(ti.f64, shape=(), needs_grad=True)
         self.loss_backtrack = ti.field(ti.f64, shape=())
 
+        self.loss_norm_factor = ti.field(ti.f64, shape=())
+        self.loss_norm_factor[None] = 1
+
     @staticmethod
     @ti.func
     def rotation_matrix(r):
@@ -182,31 +185,24 @@ class GraspNRotateSimulator:
         
         for i in self.composite_geom_id:
             # inertia
-            self.body_inertia[None] += self.geom_mass[i] * (self.geom_pos[0, 0, i] - self.body_qpos[0, 0]).norm()**2
+            self.body_inertia[None] += self.geom_mass[i] * \
+                                      (self.geom_pos[0, 0, i] - self.body_qpos[0, 0]).norm()**2
             # geom_pos0
             self.geom_pos0[i] = self.geom_pos[0, 0, i] - self.body_qpos[0, 0]
             # radius
             self.radius[i] = self.block_object.voxel_size / 2
 
     @ti.kernel
-    def add_loss(self, b: ti.i32, s: ti.i32, px: ti.f64, py: ti.f64, pw: ti.f64):
-        self.loss[None] += (self.body_qpos[b, s][0] - px)**2 + \
-                           (self.body_qpos[b, s][1] - py)**2 + \
-                           (self.body_rpos[b, s] - pw)**2
+    def add_loss(self, b: ti.i32, s: ti.i32, i: ti.i32, px: ti.f64, py: ti.f64):
+        self.loss[None] += self.loss_norm_factor[None] * \
+                           ((self.geom_pos[b, s, i][0] - px)**2 + \
+                            (self.geom_pos[b, s, i][1] - py)**2 )
 
     @ti.kernel
-    def average_loss(self, n: ti.f64):
-        self.loss[None] /= n
-
-    @ti.kernel
-    def add_loss_backtrack(self, b: ti.i32, s: ti.i64, px: ti.f64, py: ti.f64, pw: ti.f64):
-        self.loss_backtrack[None] += (self.body_qpos[b, s][0] - px)**2 + \
-                                     (self.body_qpos[b, s][1] - py)**2 + \
-                                     (self.body_rpos[b, s] - pw)**2
-
-    @ti.kernel
-    def average_loss_backtrack(self, n: ti.f64):
-        self.loss_backtrack[None] /= n            
+    def add_loss_backtrack(self, b: ti.i32, s: ti.i64, i: ti.i32, px: ti.f64, py: ti.f64):
+        self.loss_backtrack[None] += self.loss_norm_factor[None] * \
+                                     ((self.geom_pos[b, s, i][0] - px)**2 + \
+                                      (self.geom_pos[b, s, i][1] - py)**2 )
          
     def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
@@ -282,23 +278,22 @@ class GraspNRotateSimulator:
                 if render:
                     self.render(k, s)
 
-    def compute_loss(self, body_poses_gt):
-        n = 0
+    def compute_loss(self, geom_pos_gt):
+        self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
+                                      len(self.loss_steps) * self.ngeom)
         for b in self.u.keys():
             for s in self.loss_steps:
-                self.add_loss(b, s, 
-                                body_poses_gt[b, s][0],
-                                body_poses_gt[b, s][1], 
-                                body_poses_gt[b, ][2])
-                n += 1
-        self.average_loss(n)
+                for i in range(self.ngeom):
+                    self.add_loss(b, s, i, 
+                                  geom_pos_gt[b, s, i, 0], 
+                                  geom_pos_gt[b, s, i, 1])
 
-    def compute_loss_backtrack(self, body_poses_gt):
-        n = 0
+    def compute_loss_backtrack(self, geom_pos_gt):
+        self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
+                                      len(self.loss_steps) * self.ngeom)
         for b in self.u.keys():
             for s in self.loss_steps:
-                self.add_loss_backtrack(b, s, 
-                                body_poses_gt[b, s][0],
-                                body_poses_gt[b, s][1], 
-                                body_poses_gt[b, s][2])
-        self.average_loss_backtrack(n)
+                for i in range(self.ngeom):
+                    self.add_loss_backtrack(b, s, i, 
+                                            geom_pos_gt[b, s, i, 0], 
+                                            geom_pos_gt[b, s, i, 0])
