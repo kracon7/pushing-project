@@ -20,36 +20,38 @@ class Optimizer:
         return self.parameters.copy()
 
 
-class Momentum(Optimizer):
-    def initialize(self):
+class Momentum:
+    def __init__(self, parameters, bounds, lr=1e-2, momentum=0.9):
+        self.parameters = parameters
+        self.bounds = bounds
         self.momentum_buffer = np.zeros_like(self.parameters).astype(np.float64)
-        self.momentum = self.kwargs['momentum']
+        self.lr = lr
+        self.momentum = momentum
 
-    def _step(self, grads):
+    def step(self, grads):
         grads = self.momentum_buffer * self.momentum + grads * (1 - self.momentum)
         self.momentum_buffer[:] = grads
-        return self.parameters[:] - self.lr * grads
-
-    @classmethod
-    def default_config(cls):
-        cfg = Optimizer.default_config()
-        cfg.momentum = 0.9
-        return cfg
+        new_parameters =  self.parameters[:] - self.lr * grads
+        self.parameters[:] = new_parameters
+        return self.parameters.copy()
 
 
-class Adam(Optimizer):
-    def initialize(self):
-        self.momentum_buffer = np.zeros_like(self.parameters).astype(np.float64)
+class Adam:
+    def __init__(self, parameters, bounds, lr=1e-2, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+        self.parameters = parameters
+        self.momentum_buffer = np.zeros_like(parameters).astype(np.float64)
         self.v_buffer = np.zeros_like(self.momentum_buffer).astype(np.float64)
+        self.bounds = bounds
+        self.lr = lr
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
         self.iter = 0
 
-    def _step(self, grads):
-        gd = grads.reshape(*self.parameters.shape)
-        beta_1 = self.cfg.beta_1
-        beta_2 = self.cfg.beta_2
-        epsilon = self.cfg.epsilon
-        m_t = beta_1 * self.momentum_buffer + (1 - beta_1) * gd  # updates the moving averages of the gradient
-        v_t = beta_2 * self.v_buffer + (1 - beta_2) * (gd * gd)  # updates the moving averages of the squared gradient
+    def step(self, grads):
+        beta_1, beta_2, epsilon = self.beta_1, self.beta_2,  self.epsilon
+        m_t = beta_1 * self.momentum_buffer + (1 - beta_1) * grads  # updates the moving averages of the gradient
+        v_t = beta_2 * self.v_buffer + (1 - beta_2) * (grads * grads)  # updates the moving averages of the squared gradient
         self.momentum_buffer[:] = m_t
         self.v_buffer[:] = v_t
 
@@ -57,15 +59,10 @@ class Adam(Optimizer):
         v_cap = v_t / (1 - (beta_2 ** (self.iter + 1)))  # calculates the bias-corrected estimates
 
         self.iter += 1
-        return self.parameters - (self.lr * m_cap) / (np.sqrt(v_cap) + epsilon)
+        new_parameters =  self.parameters - (self.lr * m_cap) / (np.sqrt(v_cap) + epsilon)
+        self.parameters[:] = new_parameters.clip(self.bounds)
+        return self.parameters.copy()
 
-    @classmethod
-    def default_config(cls):
-        cfg = Optimizer.default_config()
-        cfg.beta_1 = 0.9
-        cfg.beta_2 = 0.999
-        cfg.epsilon = 1e-8
-        return cfg
 
 class BacktrackingMomentum:
     def __init__(self, parameters, bounds, body_poses_gt, momentum=0.7, alpha=0.1, beta=0.8, lr_0=0.01, lr_min=1e-6):

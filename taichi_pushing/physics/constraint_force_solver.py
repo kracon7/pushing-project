@@ -31,6 +31,10 @@ class ConstraintForceSolver:
         self.ngeom = self.block_object.num_particle
         self.nbody = 1
 
+        # gravity
+        self.gravity = ti.field(DTYPE, shape=())
+        self.gravity[None] = 9.8
+
         # composite mass and mass mapping
         self.composite_mass = ti.field(DTYPE, self.ngeom) 
         self.mass_mapping = ti.field(ti.i64, self.ngeom)
@@ -80,6 +84,9 @@ class ConstraintForceSolver:
         self.loss = ti.field(ti.f64, shape=(), needs_grad=True)
         self.loss_backtrack = ti.field(ti.f64, shape=())
 
+        self.loss_norm_factor = ti.field(ti.f64, shape=())
+        self.loss_norm_factor[None] = 1
+
     @staticmethod
     @ti.func
     def rotation_matrix(r):
@@ -125,8 +132,9 @@ class ConstraintForceSolver:
         # compute bottom friction force
         for i in range(self.ngeom):
             if self.geom_vel[b, s, i].norm() > 1e-6:
-                fb = - self.geom_friction[i] * self.geom_mass[i] * (self.geom_vel[b, s, i] / self.geom_vel[b, s, i].norm())
-                self.geom_force[b, s, i] += fb
+                self.geom_force[b, s, i] += \
+                        - self.geom_friction[i] * self.geom_mass[i] * self.gravity[None] * \
+                        (self.geom_vel[b, s, i] / self.geom_vel[b, s, i].norm())
 
     @ti.kernel
     def apply_external(self, b: ti.i32, s: ti.i32):
@@ -195,12 +203,10 @@ class ConstraintForceSolver:
 
     @ti.kernel
     def add_loss(self, b: ti.i32, s: ti.i32):
-        self.loss[None] += (self.geom_pos[b, s, b][0] - self.geom_pos[b, s+1, b][0])**2 + \
-                            (self.geom_pos[b, s, b][1] - self.geom_pos[b, s+1, b][1])**2
-
-    @ti.kernel
-    def average_loss(self, n: ti.f64):
-        self.loss[None] /= n
+        # self.loss[None] += (self.geom_pos[b, s, b][0] - self.geom_pos[b, s+1, b][0])**2 + \
+        #                     (self.geom_pos[b, s, b][1] - self.geom_pos[b, s+1, b][1])**2
+        self.loss[None] += self.loss_norm_factor[None] * \
+                        ti.abs(self.geom_pos[b,s,b] - self.geom_pos[b,s+1,b]).sum()
          
     def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
@@ -275,10 +281,8 @@ class ConstraintForceSolver:
                     self.render(b, s)
 
     def compute_loss(self, batch):
-        n = 0
+        self.loss_norm_factor[None] = 1e4 / (len(batch) * 
+                                self.sim_step * self.ngeom)
         for b in batch:
             for s in range(self.sim_step):
                 self.add_loss(b, s)
-                n += 1
-
-        self.average_loss(n)
