@@ -1,5 +1,6 @@
 '''
 Block object rotation by the gripper using grasp-n-rotate motion
+Simulated using the hidden states: Total mass, moment of inertia, center of mass, si (mu m g)
 Interaction is the bottom friction force
 '''
 
@@ -13,7 +14,7 @@ from .utils import Defaults
 DTYPE = Defaults.DTYPE
 
 @ti.data_oriented
-class GraspNRotateSimulator:
+class HiddenStateSimulator:
     def __init__(self, param_file, max_step=100, dt=Defaults.DT):  # Initializer of the simulator environment
         self.block_object = BlockObject(param_file)
         self.dt = dt
@@ -33,22 +34,14 @@ class GraspNRotateSimulator:
         self.gravity = ti.field(DTYPE, shape=())
         self.gravity[None] = 9.8
 
-        # composite mass and mass mapping
-        self.composite_mass = ti.field(DTYPE, self.ngeom, needs_grad=True) 
-        self.mass_mapping = ti.field(ti.i64, self.ngeom)
-        self.mass_mapping.from_numpy(self.block_object.mass_mapping)
-
         self.composite_geom_id = ti.field(ti.i64, shape=self.ngeom)
         self.composite_geom_id.from_numpy(np.arange(self.ngeom))
 
-        # friction coefficient
-        self.composite_friction = ti.field(DTYPE, self.ngeom, needs_grad=True)
-        self.friction_mapping = ti.field(ti.i64, self.ngeom)
-        self.friction_mapping.from_numpy(self.block_object.friction_mapping)
-        self.geom_friction = ti.field(DTYPE, self.ngeom, needs_grad=True)
+        # composite mass and mass mapping
+        self.composite_si = ti.field(DTYPE, self.ngeom, needs_grad=True) 
+        self.si_mapping = ti.field(ti.i64, self.ngeom)
 
         # mass, pos, vel and force of each particle
-        self.geom_mass = ti.field(DTYPE, self.ngeom, needs_grad=True)
         self.geom_pos = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
         self.geom_vel = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
         self.geom_force = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
@@ -67,20 +60,22 @@ class GraspNRotateSimulator:
         # radius of the particles
         self.radius = ti.field(DTYPE, self.ngeom)
 
+        # Hidden states
         self.body_mass = ti.field(DTYPE, shape=(), needs_grad=True)
         self.body_inertia = ti.field(DTYPE, shape=(), needs_grad=True)
+        self.body_com = ti.Vector.field(2, DTYPE, shape=(), needs_grad=True)
+        self.geom_si = ti.field(DTYPE, self.ngeom, needs_grad=True)
 
         # composite particle pos0 in original pose
         self.composite_p0 = ti.Vector.field(2, DTYPE, shape=self.ngeom)
         self.composite_p0.from_numpy(self.block_object.particle_coord)
-        # for i in range(self.ngeom):
-        #     self.composite_p0[i].from_numpy(self.block_object.particle_coord[i])
 
         self.loss = ti.field(ti.f64, shape=(), needs_grad=True)
         self.loss_backtrack = ti.field(ti.f64, shape=())
 
         self.loss_norm_factor = ti.field(ti.f64, shape=())
         self.loss_norm_factor[None] = 1
+        self.si_mapping_norm_factor = np.ones(self.ngeom)
 
     @staticmethod
     @ti.func
@@ -108,7 +103,7 @@ class GraspNRotateSimulator:
 
         for i in range(self.ngeom):
             self.geom_pos0[i] = [0., 0.]
-            self.geom_mass[i] = 0.
+            self.geom_si[i] = 0.
 
         for b, s in ti.ndrange(self.ngeom, self.max_step):
             self.body_qpos[b, s] = [0., 0.]
@@ -118,17 +113,12 @@ class GraspNRotateSimulator:
             self.body_force[b, s] = [0., 0.]
             self.body_torque[b, s] = 0.
 
-        for i in range(self.nbody):
-            self.body_mass[None] = 0.
-            self.body_inertia[None] = 0.
-
     @ti.kernel
     def bottom_friction(self, b: ti.i32, s: ti.i32):
         # compute bottom friction force
         for i in range(self.ngeom):
             if self.geom_vel[b, s, i].norm() > 1e-6:
-                self.geom_force[b, s, i] += - self.geom_friction[i] * self.geom_mass[i] * \
-                                self.gravity[None] * \
+                self.geom_force[b, s, i] += - self.geom_si[i] * \
                                 (self.geom_vel[b, s, i] / self.geom_vel[b, s, i].norm())
 
     @ti.kernel
@@ -159,9 +149,6 @@ class GraspNRotateSimulator:
         self.body_rpos[b, s+1] = self.body_rpos[b, s] + \
                                     self.dt * self.body_rvel[b, s]
 
-        # print(self.body_qpos[0, 0], self.body_qpos[0,1], self.body_qpos[1, 0], self.body_qpos[1,1],
-        #      self.body_qpos[2, 0], self.body_qpos[2,1], '\n===================')
-
     @ti.kernel
     def forward_geom(self, b: ti.i32, s: ti.i32):
         for i in range(self.ngeom):
@@ -172,26 +159,18 @@ class GraspNRotateSimulator:
 
     @ti.kernel
     def initialize(self):
-        # set geom_pos
+        # set initial geom_pos
         for b, i in ti.ndrange(self.ngeom, self.ngeom):
             self.geom_pos[b, 0, i] = self.composite_p0[i]
 
         for i in self.composite_geom_id:
-            self.geom_mass[i] = self.composite_mass[self.mass_mapping[i]]
-            self.geom_friction[i] = self.composite_friction[self.friction_mapping[i]]
-
-        #compute body mass and center of mass
-        for i in self.composite_geom_id:
-            self.body_mass[None] += self.geom_mass[i]
+            self.geom_si[i] = self.composite_si[self.si_mapping[i]]
 
         # compute the body_qpos
-        for b, i in ti.ndrange(self.ngeom, self.ngeom):
-            self.body_qpos[b, 0] += self.geom_mass[i] / self.body_mass[None] * self.geom_pos[b, 0, i]
+        for b in self.composite_geom_id:
+            self.body_qpos[b, 0] = self.body_com[None]
         
         for i in self.composite_geom_id:
-            # inertia
-            self.body_inertia[None] += self.geom_mass[i] * \
-                                      (self.geom_pos[0, 0, i] - self.body_qpos[0, 0]).norm()**2
             # geom_pos0
             self.geom_pos0[i] = self.geom_pos[0, 0, i] - self.body_qpos[0, 0]
             # radius
@@ -222,48 +201,49 @@ class GraspNRotateSimulator:
 
         self.gui.show()
 
-    def input_parameters(self, mass, mass_mapping, friction, friction_mapping, u, 
-                                loss_steps):
+    def input_parameters(self, body_mass, body_inertia, body_com, composite_si, 
+                        si_mapping, u, loss_steps):
         '''
         Set up simulation environment including mass, friction and control input u
         Args:
-            mass -- (ngeom, ) ndarray, 
-                ground truth mass vector, usually only the first few
-                are mapped to the composite_mass
-            mass_mapping -- (ngeom, ) ndarray, 
-                mapping to composite mass
-            friction -- (ngeom, ) ndarray, 
-                ground truth friction vector, similar to "mass"
-            friction_mapping -- (ngeom, ) ndarray, 
-                similar to "mass_mapping"
+            body_mass -- float
+            body_inertia -- float
+            body_com -- (2, ) ndarray
+                body center of mass
+            composite_si -- (ngeom, ) ndarray
+            si_mapping -- (ngeom, ) ndarray, 
+                mapping to si
             u -- dict, 
                 Control input. {particle_idx: list of [fx, fy, fw]}
             loss_steps -- list,
                 Time steps to accumulate loss
         '''
-        self.composite_mass.from_numpy(mass)
-        self.mass_mapping.from_numpy(mass_mapping)
-        self.composite_friction.from_numpy(friction)
-        self.friction_mapping.from_numpy(friction_mapping)
+        self.body_mass[None] = body_mass
+        self.body_inertia[None] = body_inertia
+        self.body_com.from_numpy(body_com)
+        self.composite_si.from_numpy(composite_si)
+        self.si_mapping.from_numpy(si_mapping)
+        mapping_sum = [np.sum(si_mapping==i) for i in range(si_mapping.shape[0])]
+        self.si_mapping_norm_factor = [1/i if i!=0 else 0 for i in mapping_sum]
         self.u = u
         self.loss_steps = loss_steps
 
-    def update_parameter(self, param, param_name):
-        if param_name == "mass":
-            self.composite_mass.from_numpy(param)
-        elif param_name == "friction":
-            self.composite_friction.from_numpy(param)
-        else:
-            raise Exception("Unknown parameter type")
+    # def update_parameter(self, param, param_name):
+    #     if param_name == "mass":
+    #         self.composite_mass.from_numpy(param)
+    #     elif param_name == "friction":
+    #         self.composite_friction.from_numpy(param)
+    #     else:
+    #         raise Exception("Unknown parameter type")
 
-    def get_parameter(self, param_name):
-        if param_name == "mass":
-            param = self.composite_mass.to_numpy()
-        elif param_name == "friction":
-            param = self.composite_friction.to_numpy()
-        else:
-            raise Exception("Unknown parameter type")
-        return param
+    # def get_parameter(self, param_name):
+    #     if param_name == "mass":
+    #         param = self.composite_mass.to_numpy()
+    #     elif param_name == "friction":
+    #         param = self.composite_friction.to_numpy()
+    #     else:
+    #         raise Exception("Unknown parameter type")
+    #     return param
 
     def run(self, sim_steps, render=False):
         for k in self.u:
@@ -302,3 +282,33 @@ class GraspNRotateSimulator:
                     self.add_loss_backtrack(b, s, i, 
                                             geom_pos_gt[b, s, i, 0], 
                                             geom_pos_gt[b, s, i, 0])
+
+    def map_to_hidden_state(self, composite_mass, mass_mapping, composite_friction, 
+                            friction_mapping):
+        '''
+        From particle mass/friction to hidden states
+        '''
+        geom_mass, geom_friction = np.zeros(self.ngeom), np.zeros(self.ngeom)
+        for i in range(self.ngeom):
+            geom_mass[i] = composite_mass[mass_mapping[i]]
+            geom_friction[i] = composite_friction[friction_mapping[i]]
+
+        geom_pos = self.block_object.particle_coord
+        body_mass = np.sum(geom_mass)
+        body_com = np.zeros(2)
+        for i in range(self.ngeom):
+            body_com += geom_pos[i] * geom_mass[i] / body_mass
+
+        body_inertia = 0.
+        for i in range(self.ngeom):
+            body_inertia += geom_mass[i] * np.linalg.norm(geom_pos[i] - body_com)**2
+
+        si = np.zeros(self.ngeom)
+        for i in range(self.ngeom):
+            si[i] = geom_mass[i] * geom_friction[i] * self.gravity[None]
+        
+        hidden_state = {"body_mass": body_mass,
+                        "body_inertia": body_inertia,
+                        "body_com": body_com,
+                        "si": si}
+        return hidden_state
