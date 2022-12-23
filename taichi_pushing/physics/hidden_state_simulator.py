@@ -177,10 +177,11 @@ class HiddenStateSimulator:
             self.radius[i] = self.block_object.voxel_size / 2
 
     @ti.kernel
-    def add_loss(self, b: ti.i32, s: ti.i32, i: ti.i32, px: ti.f64, py: ti.f64):
+    def add_loss(self, b: ti.i32, s: ti.i32, vx: ti.f64, vy: ti.f64, vw: ti.f64):
         self.loss[None] += self.loss_norm_factor[None] * \
-                           ((self.geom_pos[b, s, i][0] - px)**2 + \
-                            (self.geom_pos[b, s, i][1] - py)**2 )
+                           (ti.abs(self.body_qvel[b, s][0] - vx) + \
+                            ti.abs(self.body_qvel[b, s][1] - vy) + \
+                            ti.abs(self.body_rvel[b, s] - vw))
 
     @ti.kernel
     def add_loss_backtrack(self, b: ti.i32, s: ti.i64, i: ti.i32, px: ti.f64, py: ti.f64):
@@ -263,25 +264,23 @@ class HiddenStateSimulator:
                 if render:
                     self.render(k, s)
 
-    def compute_loss(self, geom_pos_gt):
+    def compute_loss(self, body_qvel_gt, body_rvel_gt):
         self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
                                       len(self.loss_steps) * self.ngeom)
         for b in self.u.keys():
             for s in self.loss_steps:
-                for i in range(self.ngeom):
-                    self.add_loss(b, s, i, 
-                                  geom_pos_gt[b, s, i, 0], 
-                                  geom_pos_gt[b, s, i, 1])
+                self.add_loss(b, s, body_qvel_gt[b, s, 0], body_qvel_gt[b, s, 1],
+                                body_rvel_gt[b, s])
 
-    def compute_loss_backtrack(self, geom_pos_gt):
-        self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
-                                      len(self.loss_steps) * self.ngeom)
-        for b in self.u.keys():
-            for s in self.loss_steps:
-                for i in range(self.ngeom):
-                    self.add_loss_backtrack(b, s, i, 
-                                            geom_pos_gt[b, s, i, 0], 
-                                            geom_pos_gt[b, s, i, 0])
+    # def compute_loss_backtrack(self, geom_pos_gt):
+    #     self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
+    #                                   len(self.loss_steps) * self.ngeom)
+    #     for b in self.u.keys():
+    #         for s in self.loss_steps:
+    #             for i in range(self.ngeom):
+    #                 self.add_loss_backtrack(b, s, i, 
+    #                                         geom_pos_gt[b, s, i, 0], 
+    #                                         geom_pos_gt[b, s, i, 0])
 
     def map_to_hidden_state(self, composite_mass, mass_mapping, composite_friction, 
                             friction_mapping):
