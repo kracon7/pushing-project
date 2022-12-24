@@ -1,5 +1,5 @@
 '''
-Test hidden state inferencing with hidden state simulator
+Hidden state si loss contour and gradient direction plot with hidden state simulator
 '''
 
 import os
@@ -15,7 +15,6 @@ from taichi_pushing.physics.grasp_n_rotate_simulator import GraspNRotateSimulato
 from taichi_pushing.physics.constraint_force_solver import ConstraintForceSolver
 from taichi_pushing.optimizer.optim import Momentum
 from taichi_pushing.physics.utils import Defaults
-import matplotlib.pyplot as plt
 
 SIM_STEP = 50
 
@@ -81,16 +80,43 @@ if __name__ == '__main__':
 
     # ===========  Hidden state inference mass parameters  ============= #
     hidden_state = hidden_state_gt.copy()
-    hidden_state["si"][0], hidden_state["si"][1] = 0.3, 0.7
+    
+    state_space = np.meshgrid(np.linspace(0.29, 0.69, 41), np.linspace(0.29, 0.69, 41), indexing='ij')
+    n1, n2 = state_space[0].shape
+    loss_grid = np.zeros((n1, n2))
+    grad_grid = np.zeros((n1, n2, 2))
+    # Run sim on different mass state and compute loss
+    for i in range(n1):
+        for j in range(n2):
+            hidden_state['si'][0], hidden_state["si"][1] = state_space[0][i,j], state_space[1][i,j]
 
-    sim.input_parameters(hidden_state["body_mass"], hidden_state["body_inertia"], 
-                hidden_state["body_com"], hidden_state["si"], mapping, u, loss_steps)
+            sim.input_parameters(hidden_state["body_mass"], hidden_state["body_inertia"], 
+                        hidden_state["body_com"], hidden_state["si"], mapping, u, loss_steps)
 
-    for i in range(1000):
-        with ti.ad.Tape(sim.loss):
-            sim.run(SIM_STEP)
-            sim.compute_loss(body_qvel_gt, body_rvel_gt)
+            with ti.ad.Tape(sim.loss):
+                sim.run(SIM_STEP)
+                sim.compute_loss(body_qvel_gt, body_rvel_gt)
 
-        print('Iter %05d, loss: %.9f, grad: %.5f, %.5f, at : %.5f, %.5f'%(
-                i, sim.loss[None], sim.composite_si.grad[0], sim.composite_si.grad[1], 
-                sim.composite_si[0], sim.composite_si[1]))
+            print('Loss: %.9f, grad: %.5f, %.5f, at : %.5f, %.5f'%(
+                    sim.loss[None], sim.composite_si.grad[0], sim.composite_si.grad[1], 
+                    sim.composite_si[0], sim.composite_si[1]))
+
+            grad = [sim.composite_si.grad.to_numpy()[0], 
+                    sim.composite_si.grad.to_numpy()[1]]
+
+            loss_grid[i, j] = sim.loss[None]
+            grad_grid[i, j] = - np.array(grad) / np.linalg.norm(grad)
+    
+    f = ff.create_quiver(state_space[1], state_space[0], grad_grid[:,:,1], grad_grid[:,:,0],
+                        scale=0.008)
+    trace1 = f.data[0]
+    trace2 = go.Contour(z=loss_grid, y0=0.29, dy=0.01, x0=0.29, dx=0.01,
+                            contours=dict(
+                                start=0,
+                                end=loss_grid.max(),
+                                size=loss_grid.max() / 100,
+                            )
+                        )
+    # Plot the loss contour
+    fig = go.Figure(data = [trace1, trace2])
+    fig.show()

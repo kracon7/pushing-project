@@ -46,7 +46,7 @@ class HiddenStateSimulator:
         self.geom_vel = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
         self.geom_force = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
         self.geom_torque = ti.field(DTYPE, shape=(self.ngeom, self.max_step, self.ngeom), needs_grad=True)
-        self.geom_pos0 = ti.Vector.field(2, DTYPE, shape=self.ngeom, needs_grad=True)
+        self.geom_t0 = ti.Vector.field(2, DTYPE, shape=self.ngeom, needs_grad=True)
  
         self.body_qpos = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step), needs_grad=True)
         self.body_qvel = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step), needs_grad=True)
@@ -102,7 +102,7 @@ class HiddenStateSimulator:
             self.geom_torque[b, s, i] = 0.
 
         for i in range(self.ngeom):
-            self.geom_pos0[i] = [0., 0.]
+            self.geom_t0[i] = [0., 0.]
             self.geom_si[i] = 0.
 
         for b, s in ti.ndrange(self.ngeom, self.max_step):
@@ -153,9 +153,9 @@ class HiddenStateSimulator:
     def forward_geom(self, b: ti.i32, s: ti.i32):
         for i in range(self.ngeom):
             rot = self.rotation_matrix(self.body_rpos[b, s+1])
-            self.geom_pos[b, s+1, i] = self.body_qpos[b, s+1] + rot @ self.geom_pos0[i]
+            self.geom_pos[b, s+1, i] = self.body_qpos[b, s+1] + rot @ self.geom_t0[i]
             self.geom_vel[b, s+1, i] = self.body_qvel[b, s+1] + self.body_rvel[b, s+1] \
-                                            * self.right_orthogonal(rot @ self.geom_pos0[i])
+                                            * self.right_orthogonal(rot @ self.geom_t0[i])
 
     @ti.kernel
     def initialize(self):
@@ -171,8 +171,8 @@ class HiddenStateSimulator:
             self.body_qpos[b, 0] = self.body_com[None]
         
         for i in self.composite_geom_id:
-            # geom_pos0
-            self.geom_pos0[i] = self.geom_pos[0, 0, i] - self.body_qpos[0, 0]
+            # geom_t0
+            self.geom_t0[i] = self.composite_p0[i] - self.body_com[None]
             # radius
             self.radius[i] = self.block_object.voxel_size / 2
 
