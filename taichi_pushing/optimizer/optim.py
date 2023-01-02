@@ -1,43 +1,43 @@
 import numpy as np
 
-class Optimizer:
-    def __init__(self, parameters: np.ndarray, **kwargs):
-        self.kwargs = kwargs
-        self.lr = kwargs['lr']
-        self.bounds = kwargs['bounds']
-        self.parameters = parameters
-        self.initialize()
-
-    def initialize(self):
-        raise NotImplementedError
-
-    def _step(self, grads):
-        raise NotImplementedError
-
-    def step(self, grads):
-        assert grads.shape == self.parameters.shape
-        self.parameters[:] = self._step(grads).clip(*self.bounds)
-        return self.parameters.copy()
-
-
 class Momentum:
-    def __init__(self, parameters, bounds, lr=1e-2, momentum=0.9):
+    def __init__(self, parameters, bounds, lr=1e-2, momentum=0.9, 
+                    alpha=0.95, k=100, lr_min=1e-5):
+        '''
+        Exponential decay of the learning rate by alpha for every k iterations, 
+        until it reaches lr_min
+        '''
         self.parameters = parameters
         self.bounds = bounds
         self.momentum_buffer = np.zeros_like(self.parameters).astype(np.float64)
         self.lr = lr
         self.momentum = momentum
+        self.alpha = alpha
+        self.k = k
+        self.lr_min = lr_min
+        self.iter = 0
+
+    def update_lr(self):
+        if self.iter > 0 and self.iter % self.k == 0 and self.lr > self.lr_min:
+            self.lr *= self.alpha
 
     def step(self, grads):
+        self.iter += 1
         grads = self.momentum_buffer * self.momentum + grads * (1 - self.momentum)
         self.momentum_buffer[:] = grads
         new_parameters =  self.parameters[:] - self.lr * grads
         self.parameters[:] = new_parameters
+        self.update_lr()
         return self.parameters.copy()
 
 
 class Adam:
-    def __init__(self, parameters, bounds, lr=1e-2, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+    def __init__(self, parameters, bounds, lr=1e-2, beta_1=0.9, beta_2=0.999, epsilon=1e-8,
+                 alpha=0.95, k=100, lr_min=1e-5):
+        '''
+        Exponential decay of the learning rate by alpha for every k iterations, 
+        until it reaches lr_min
+        '''
         self.parameters = parameters
         self.momentum_buffer = np.zeros_like(parameters).astype(np.float64)
         self.v_buffer = np.zeros_like(self.momentum_buffer).astype(np.float64)
@@ -46,7 +46,14 @@ class Adam:
         self.beta_1 = beta_1
         self.beta_2 = beta_2
         self.epsilon = epsilon
+        self.alpha = alpha
+        self.k = k
+        self.lr_min = lr_min
         self.iter = 0
+
+    def update_lr(self):
+        if self.iter > 0 and self.iter % self.k == 0 and self.lr > self.lr_min:
+            self.lr *= self.alpha
 
     def step(self, grads):
         beta_1, beta_2, epsilon = self.beta_1, self.beta_2,  self.epsilon
@@ -61,7 +68,10 @@ class Adam:
         self.iter += 1
         new_parameters =  self.parameters - (self.lr * m_cap) / (np.sqrt(v_cap) + epsilon)
         self.parameters[:] = new_parameters.clip(self.bounds)
+        self.update_lr()
         return self.parameters.copy()
+
+        
 
 
 class BacktrackingMomentum:

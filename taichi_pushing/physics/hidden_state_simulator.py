@@ -229,13 +229,19 @@ class HiddenStateSimulator:
         self.u = u
         self.loss_steps = loss_steps
 
-    # def update_parameter(self, param, param_name):
-    #     if param_name == "mass":
-    #         self.composite_mass.from_numpy(param)
-    #     elif param_name == "friction":
-    #         self.composite_friction.from_numpy(param)
-    #     else:
-    #         raise Exception("Unknown parameter type")
+    def update_parameter(self, param_name='', param=None):
+        if param_name == "body_mass":
+            self.body_mass[None] = param
+        elif param_name == "body_inertia":
+            self.body_inertia[None] = param
+        elif param_name == "body_com":
+            self.body_com.from_numpy(param)
+        elif param_name == "si":
+            self.composite_si.from_numpy(param)
+        elif param_name == "si_mapping":
+            self.si_mapping.from_numpy(param)
+        else:
+            raise Exception("Unknown parameter type")
 
     # def get_parameter(self, param_name):
     #     if param_name == "mass":
