@@ -8,9 +8,8 @@ import numpy as np
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
 import taichi as ti
-from scipy.spatial.transform import Rotation
 from taichi_pushing.physics.hidden_state_simulator import HiddenStateSimulator
-from taichi_pushing.physics.grasp_n_rotate_simulator import GraspNRotateSimulator
+from taichi_pushing.physics.hidden_state_mapping import HiddenStateMapping
 from taichi_pushing.physics.constraint_force_solver import ConstraintForceSolver
 from taichi_pushing.optimizer.optim import Momentum
 from taichi_pushing.physics.utils import Defaults
@@ -32,8 +31,10 @@ if __name__ == '__main__':
     mass_gt = 0.1 * np.ones(sim.block_object.num_particle)
     friction_gt = 0.5 * np.ones(sim.block_object.num_particle)
     n_partition = 6
-    mapping = np.repeat(np.arange(n_partition), sim.ngeom//n_partition).astype("int")
-    assert mapping.shape[0] == sim.ngeom
+    mass_mapping = np.repeat(np.arange(n_partition), 
+                             sim.ngeom//n_partition).astype("int")
+    friction_mapping = np.zeros(sim.block_object.num_particle).astype("int")
+    assert mass_mapping.shape[0] == sim.ngeom
 
     # Time steps to include in loss computation
     loss_steps = [i for i in range(2, SIM_STEP-1, 1)]
@@ -49,11 +50,12 @@ if __name__ == '__main__':
     for b in batch:
         torque[b] = 4
 
-    constraint_solver.input_parameters(mass_gt, mapping, friction_gt, mapping, force, torque)
+    constraint_solver.input_parameters(mass_gt, mass_mapping, 
+                                    friction_gt, friction_mapping, force, torque)
 
     optim = Momentum(force, lr=300, bounds=[-100, 100], momentum=0.9, alpha=0.9)
 
-    for i in range(1500):
+    for i in range(10):
         with ti.ad.Tape(constraint_solver.loss):
             constraint_solver.run(batch)
             constraint_solver.compute_loss(batch)
@@ -71,9 +73,15 @@ if __name__ == '__main__':
     u = {b: force_torque[b] for b in batch}
 
     # ===========  Run the ground truth hidden state sim  ============= #
-    hidden_state_gt = sim.map_to_hidden_state(mass_gt, mapping, friction_gt, mapping)
-    sim_gt.input_parameters(hidden_state_gt["body_mass"], hidden_state_gt["body_inertia"], 
-                hidden_state_gt["body_com"], hidden_state_gt["si"], mapping, u, loss_steps)
+    hidden_state_mapping = HiddenStateMapping(sim)
+    hidden_state_gt = hidden_state_mapping.map_to_hidden_state(mass_gt, mass_mapping,
+                                                    friction_gt, friction_mapping)
+    sim_gt.input_parameters(hidden_state_gt["body_mass"], 
+                            hidden_state_gt["body_inertia"], 
+                            hidden_state_gt["body_com"], 
+                            hidden_state_gt["composite_si"], 
+                            hidden_state_gt["si_mapping"], 
+                            u, loss_steps)
     sim_gt.run(SIM_STEP, render=True)
     body_qvel_gt = sim_gt.body_qvel.to_numpy()
     body_rvel_gt = sim_gt.body_rvel.to_numpy()
@@ -81,13 +89,17 @@ if __name__ == '__main__':
     # ===========  Hidden state inference mass parameters  ============= #
     hidden_state = hidden_state_gt.copy()
     for i in range(n_partition):
-        hidden_state['si'][i] = 0.39 + 0.1 * np.random.randint(3)
+        hidden_state['composite_si'][i] = 0.39 + 0.1 * np.random.randint(3)
 
-    sim.input_parameters(hidden_state["body_mass"], hidden_state["body_inertia"], 
-                hidden_state["body_com"], hidden_state["si"], mapping, u, loss_steps)
+    sim.input_parameters(hidden_state["body_mass"], 
+                         hidden_state["body_inertia"], 
+                         hidden_state["body_com"], 
+                         hidden_state["composite_si"], 
+                         hidden_state["si_mapping"], 
+                         u, loss_steps)
 
     # Add parameter to the optimizer
-    si_optim = Momentum(hidden_state['si'], lr=1e-1, bounds=[0, 1]
+    si_optim = Momentum(hidden_state['composite_si'], lr=1e-1, bounds=[0, 1]
     )
     # GD with momentum
     for i in range(500):
@@ -96,7 +108,7 @@ if __name__ == '__main__':
             sim.compute_loss(body_qvel_gt, body_rvel_gt)
 
         grad = sim.composite_si.grad.to_numpy()
-        hidden_state['si'] = si_optim.step(grad)
-        sim.update_parameter("si", hidden_state["si"])
+        hidden_state['composite_si'] = si_optim.step(grad)
+        sim.update_parameter("composite_si", hidden_state["composite_si"])
 
-        print('Iteration: %d, Loss: %.9f'%(i, sim.loss[None]), hidden_state["si"][:n_partition])
+        print('Iteration: %d, Loss: %.9f'%(i, sim.loss[None]), hidden_state["composite_si"][:n_partition])

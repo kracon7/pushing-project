@@ -5,32 +5,26 @@ import plotly.graph_objects as go
 
 '''
 Shape coordinate frame
-        1 1 1 1 1 1
-        1 1 1 1 1 1
-        1 1 1 1 1 1
-        1 1 1
-        1 1 1           ^ X
-        1 1 1           |
-        1 1 1 1 1 1     |
-        1 1 1 1 1 1     |
-        1 1 1 1 1 1     |
-                        |
-            <-----------O
-            Y
+        1 1 1 1
+        1 1 1 1
+        1 1       ^ X
+        1 1         |
+        1 1 1 1     |
+        1 1 1 1     |
+                    |
+        <-----------O
+        Y
 
 Mass mapping order
-        3 3 3 4 4 4
-        3 3 3 4 4 4
-        3 3 3 4 4 4
-        2 2 2
-        2 2 2           ^ X
-        2 2 2           |
-        0 0 0 1 1 1     |
-        0 0 0 1 1 1     |
-        0 0 0 1 1 1     |
-                        |
-            <-----------O
-            Y
+        3 3 4 4
+        3 3 4 4
+        2 2         ^ X
+        2 2         |
+        0 0 1 1     |
+        0 0 1 1     |
+                    |
+        <-----------O
+        Y
 '''
 
 class BlockObject:
@@ -55,12 +49,12 @@ class BlockObject:
             for j in range(n_b):
                 block_idx = [m_b - i, j]
                 array_idx = [resol * block_idx[0] - (resol // 2) - 1,
-                             resol * block_idx[1] + (resol // 2)]
+                             resol * block_idx[1] + ((resol - 1) // 2)]
                 # print("i: %d, j: %d , array i: %d, j: %d, block i: %d, j: %d"%\
-                        # (i, j, array_idx[0], array_idx[1], block_idx[0], block_idx[1]))
+                #         (i, j, array_idx[0], array_idx[1], block_idx[0], block_idx[1]))
                 if self.shape_array[array_idx[0], array_idx[1]] == 1:
-                    for k in range(-(resol // 2), resol // 2 + 1):
-                        for l in range(-(resol // 2), resol // 2 + 1):
+                    for k in range(-((resol-1) // 2), resol // 2 + 1):
+                        for l in range(-((resol-1) // 2), resol // 2 + 1):
                             # particle coordinate in object bottom left frame
                             coord.append([ i * block_size + k * self.voxel_size,
                                           -j * block_size + l * self.voxel_size])

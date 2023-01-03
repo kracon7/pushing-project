@@ -236,7 +236,7 @@ class HiddenStateSimulator:
             self.body_inertia[None] = param
         elif param_name == "body_com":
             self.body_com.from_numpy(param)
-        elif param_name == "si":
+        elif param_name == "composite_si":
             self.composite_si.from_numpy(param)
         elif param_name == "si_mapping":
             self.si_mapping.from_numpy(param)
@@ -277,43 +277,3 @@ class HiddenStateSimulator:
             for s in self.loss_steps:
                 self.add_loss(b, s, body_qvel_gt[b, s, 0], body_qvel_gt[b, s, 1],
                                 body_rvel_gt[b, s])
-
-    # def compute_loss_backtrack(self, geom_pos_gt):
-    #     self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
-    #                                   len(self.loss_steps) * self.ngeom)
-    #     for b in self.u.keys():
-    #         for s in self.loss_steps:
-    #             for i in range(self.ngeom):
-    #                 self.add_loss_backtrack(b, s, i, 
-    #                                         geom_pos_gt[b, s, i, 0], 
-    #                                         geom_pos_gt[b, s, i, 0])
-
-    def map_to_hidden_state(self, composite_mass, mass_mapping, composite_friction, 
-                            friction_mapping):
-        '''
-        From particle mass/friction to hidden states
-        '''
-        geom_mass, geom_friction = np.zeros(self.ngeom), np.zeros(self.ngeom)
-        for i in range(self.ngeom):
-            geom_mass[i] = composite_mass[mass_mapping[i]]
-            geom_friction[i] = composite_friction[friction_mapping[i]]
-
-        geom_pos = self.block_object.particle_coord
-        body_mass = np.sum(geom_mass)
-        body_com = np.zeros(2)
-        for i in range(self.ngeom):
-            body_com += geom_pos[i] * geom_mass[i] / body_mass
-
-        body_inertia = 0.
-        for i in range(self.ngeom):
-            body_inertia += geom_mass[i] * np.linalg.norm(geom_pos[i] - body_com)**2
-
-        si = np.zeros(self.ngeom)
-        for i in range(self.ngeom):
-            si[i] = geom_mass[i] * geom_friction[i] * self.gravity[None]
-        
-        hidden_state = {"body_mass": body_mass,
-                        "body_inertia": body_inertia,
-                        "body_com": body_com,
-                        "si": si}
-        return hidden_state
