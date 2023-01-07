@@ -17,3 +17,4 @@ experimental
 .ipynb_checkpoints
 tmp/*
 examples/**/*.png
+data

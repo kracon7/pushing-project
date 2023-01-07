@@ -1,13 +1,11 @@
 '''
-Block object rotation by the gripper using grasp-n-rotate motion
-Simulated using the hidden states: Total mass, moment of inertia, center of mass, si (mu m g)
-Interaction is the bottom friction force
+Compute the reactive constraint force with the block object rotation 
+by the gripper using grasp-n-rotate motion.
+The interaction is the bottom friction force.
 '''
 
-import os
-import sys
-import numpy as np
 import sympy as sp
+import numpy as np
 import taichi as ti
 from .block_object_util import BlockObject
 from .utils import Defaults
@@ -15,10 +13,11 @@ from .utils import Defaults
 DTYPE = Defaults.DTYPE
 
 @ti.data_oriented
-class HiddenStateSimulator:
-    def __init__(self, param_file, max_step=100, dt=Defaults.DT):  # Initializer of the simulator environment
+class ConstantSpeedConstraintSolver:
+    def __init__(self, param_file, sim_step, max_step=100, dt=Defaults.DT):  # Initializer of the simulator environment
         self.block_object = BlockObject(param_file)
         self.dt = dt
+        self.sim_step = sim_step
         self.max_step = max_step
 
         # world bound
@@ -58,6 +57,9 @@ class HiddenStateSimulator:
         self.body_force = ti.Vector.field(2, DTYPE, shape=(self.ngeom, self.max_step), needs_grad=True)
         self.body_torque = ti.field(DTYPE, shape=(self.ngeom, self.max_step), needs_grad=True)
 
+        self.external_force = ti.Vector.field(2, DTYPE, shape=(self.ngeom, sim_step), needs_grad=True)
+        self.external_torque = ti.field(DTYPE, shape=self.ngeom, needs_grad=True)
+
         # radius of the particles
         self.radius = ti.field(DTYPE, self.ngeom)
 
@@ -72,11 +74,15 @@ class HiddenStateSimulator:
         self.composite_p0.from_numpy(self.block_object.particle_coord)
 
         self.loss = ti.field(ti.f64, shape=(), needs_grad=True)
-        self.loss_backtrack = ti.field(ti.f64, shape=())
-
+    
         self.loss_norm_factor = ti.field(ti.f64, shape=())
         self.loss_norm_factor[None] = 1
-        self.si_mapping_norm_factor = np.ones(self.ngeom)
+
+        self.torque_norm_factor = ti.field(ti.f64, shape=())
+        self.torque_norm_factor[None] = 1
+
+        self.constant_torque_loss = ti.field(ti.f64, shape=(), needs_grad=True)
+
 
     @staticmethod
     @ti.func
@@ -107,7 +113,6 @@ class HiddenStateSimulator:
         self.body_force.from_numpy(np.zeros((self.ngeom, self.max_step, 2)))
         self.body_torque.from_numpy(np.zeros((self.ngeom, self.max_step)))
 
-
     @ti.kernel
     def bottom_friction(self, b: ti.i32, s: ti.i32):
         # compute bottom friction force
@@ -117,10 +122,10 @@ class HiddenStateSimulator:
                                 (self.geom_vel[b, s, i] / self.geom_vel[b, s, i].norm())
 
     @ti.kernel
-    def apply_external(self, b: ti.i32, s: ti.i32, fx: ti.f64, fy: ti.f64, fw: ti.f64):
-        self.geom_force[b, s, b][0] += fx
-        self.geom_force[b, s, b][1] += fy
-        self.geom_torque[b, s, b] += fw
+    def apply_external(self, b: ti.i32, s: ti.i32):
+        self.geom_force[b, s, b][0] += self.external_force[b, s][0]
+        self.geom_force[b, s, b][1] += self.external_force[b, s][1]
+        self.geom_torque[b, s, b] += self.external_torque[b]
                     
     @ti.kernel
     def compute_ft(self, b: ti.i32, s: ti.i32):
@@ -153,40 +158,14 @@ class HiddenStateSimulator:
                                             * self.right_orthogonal(rot @ self.geom_t0[i])
 
     @ti.kernel
-    def initialize(self):
-        # set initial geom_pos
-        for b, i in ti.ndrange(self.ngeom, self.ngeom):
-            self.geom_pos[b, 0, i] = self.composite_p0[i]
-
-        for i in self.composite_geom_id:
-            self.geom_si[i] = self.composite_si[self.si_mapping[i]]
-
-        # compute the body_qpos
-        for b in self.composite_geom_id:
-            self.body_qpos[b, 0] = self.body_com[None]
-        
-        for i in self.composite_geom_id:
-            # geom_t0
-            self.geom_t0[i] = self.composite_p0[i] - self.body_com[None]
-            # radius
-            self.radius[i] = self.block_object.voxel_size / 2
-
-    @ti.kernel
-    def add_loss(self, b: ti.i32, s: ti.i32, vx: ti.f64, vy: ti.f64, vw: ti.f64):
+    def add_loss(self, b: ti.i32, s: ti.i32):
         self.loss[None] += self.loss_norm_factor[None] * \
-                           (ti.abs(self.body_qvel[b, s][0] - vx) + \
-                            ti.abs(self.body_qvel[b, s][1] - vy) + \
-                            ti.abs(self.body_rvel[b, s] - vw))
-
-    @ti.kernel
-    def add_loss_backtrack(self, b: ti.i32, s: ti.i64, i: ti.i32, px: ti.f64, py: ti.f64):
-        self.loss_backtrack[None] += self.loss_norm_factor[None] * \
-                                     ((self.geom_pos[b, s, i][0] - px)**2 + \
-                                      (self.geom_pos[b, s, i][1] - py)**2 )
+                        ti.abs(self.geom_pos[b,s,b] - self.geom_pos[b,s+1,b]).sum()
+        self.loss[None] += self.loss_norm_factor[None] *  self.torque_norm_factor[None] *\
+                        ti.abs(self.body_rvel[b,s] - self.body_rvel[b,0])
          
-    def render(self, b, s, fname=None):  # Render the scene on GUI
+    def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
-        # print(np_pos[:10])
         np_pos = (np_pos - np.array([self.wx_min, self.wy_min])) / \
                  (np.array([self.wx_max-self.wx_min, self.wy_max-self.wy_min]))
 
@@ -195,58 +174,30 @@ class HiddenStateSimulator:
         idx = self.composite_geom_id.to_numpy()
         self.gui.circles(np_pos[idx], color=0xffffff, radius=r)
 
-        self.gui.show(fname)
+        self.gui.show()
 
-    def input_parameters(self, hidden_state, u, loss_steps):
-        '''
-        Set up simulation environment including mass, friction and control input u
-        Args:
-            body_mass -- float
-            body_inertia -- float
-            body_com -- (2, ) ndarray
-                body center of mass
-            composite_si -- (ngeom, ) ndarray
-            si_mapping -- (ngeom, ) ndarray, 
-                mapping to si
-            u -- dict, 
-                Control input. {particle_idx: list of [fx, fy, fw]}
-            loss_steps -- list,
-                Time steps to accumulate loss
-        '''
+    def input_parameters(self, hidden_state):
         self.hidden_state = hidden_state
         self.body_mass[None] = hidden_state["body_mass"]
         self.body_inertia[None] = hidden_state["body_inertia"]
         self.body_com.from_numpy(hidden_state["body_com"])
         self.composite_si.from_numpy(hidden_state["composite_si"])
         self.si_mapping.from_numpy(hidden_state["si_mapping"])
-        mapping_sum = [np.sum(hidden_state["si_mapping"]==i) 
-                        for i in range(hidden_state["si_mapping"].shape[0])]
-        self.si_mapping_norm_factor = [1/i if i!=0 else 0 for i in mapping_sum]
-        self.u = u
-        self.loss_steps = loss_steps
 
-    def update_parameter(self, param_name='', param=None):
-        if param_name == "body_mass":
-            self.body_mass[None] = param
-        elif param_name == "body_inertia":
-            self.body_inertia[None] = param
-        elif param_name == "body_com":
-            self.body_com.from_numpy(param)
-        elif param_name == "composite_si":
-            self.composite_si.from_numpy(param)
-        elif param_name == "si_mapping":
-            self.si_mapping.from_numpy(param)
-        else:
-            raise Exception("Unknown parameter type")
+    def initialize(self):
+        for i in range(self.ngeom):
+            for b in range(self.ngeom):
+                self.geom_pos[b, 0, i] = self.composite_p0[i]
 
-    # def get_parameter(self, param_name):
-    #     if param_name == "mass":
-    #         param = self.composite_mass.to_numpy()
-    #     elif param_name == "friction":
-    #         param = self.composite_friction.to_numpy()
-    #     else:
-    #         raise Exception("Unknown parameter type")
-    #     return param
+        for i in range(self.ngeom):
+            self.geom_si[i] = self.composite_si[self.si_mapping[i]]
+
+        for b in range(self.ngeom):
+            self.body_qpos[b, 0] = self.body_com[None]
+        
+        for i in range(self.ngeom):
+            self.geom_t0[i] = self.composite_p0[i] - self.body_com[None]
+            self.radius[i] = self.block_object.voxel_size / 2
 
     def apply_initial_speed(self, batch_speed):
         t0 = []
@@ -270,30 +221,44 @@ class HiddenStateSimulator:
             self.body_rvel[b, 0] = w
             self.forward_geom(b, 0)
 
-    def run(self, sim_steps, render=False):
-        for k in self.u:
-            if sim_steps > len(self.u[k]):
-                raise Exception("Undefined control input on particle %d, sim steps too long"%k)
-        
+    def run(self, batch_speed, auto_diff=True, render=False):
+        '''
+        Args:
+            batch_speed -- dictionary {i: w}
+                    particle index i and rotation velocity w
+        '''
+        self.reset()
         self.initialize()
-        for k in self.u:
-            for s in range(sim_steps):
-                self.bottom_friction(k, s)
-                self.apply_external(k, s, self.u[k][s][0], self.u[k][s][1], self.u[k][s][2])
-                self.compute_ft(k, s)
-                self.forward_body(k, s)
-                self.forward_geom(k, s+1)
+        self.apply_initial_speed(batch_speed)
+        if not auto_diff:
+            for b in batch_speed.keys():
+                for s in range(self.sim_step):
+                    self.bottom_friction(b, s)
+                    self.apply_external(b, s)
+                    self.compute_ft(b, s)
+                    self.forward_body(b, s)
+                    self.forward_geom(b, s+1)
 
-                if render:
-                    self.render(k, s)
+                    if render:
+                        self.render(b, s)
+        else:
+            with ti.ad.Tape(self.loss):
+                for b in batch_speed.keys():
+                    for s in range(self.sim_step):
+                        self.bottom_friction(b, s)
+                        self.apply_external(b, s)
+                        self.compute_ft(b, s)
+                        self.forward_body(b, s)
+                        self.forward_geom(b, s+1)
 
-    def compute_loss(self, body_qvel_gt, body_rvel_gt):
-        self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
-                                      len(self.loss_steps) * self.ngeom)
-        for b in self.u.keys():
-            for s in self.loss_steps:
-                self.add_loss(b, s, body_qvel_gt[b, s, 0], body_qvel_gt[b, s, 1],
-                                body_rvel_gt[b, s])
+                self.compute_loss(batch_speed)
+
+    def compute_loss(self, batch_speed):
+        self.loss_norm_factor[None] = 1e2
+        self.torque_norm_factor[None] = 1 / self.sim_step
+        for b in batch_speed.keys():
+            for s in range(self.sim_step):
+                self.add_loss(b, s)
 
     @staticmethod
     def sympy_rotation_matrix(r: sp.Symbol):

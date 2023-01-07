@@ -26,7 +26,7 @@ class Momentum:
         grads = self.momentum_buffer * self.momentum + grads * (1 - self.momentum)
         self.momentum_buffer[:] = grads
         new_parameters =  self.parameters[:] - self.lr * grads
-        self.parameters[:] = new_parameters
+        self.parameters[:] = new_parameters.clip(*self.bounds)
         self.update_lr()
         return self.parameters.copy()
 
@@ -67,7 +67,7 @@ class Adam:
 
         self.iter += 1
         new_parameters =  self.parameters - (self.lr * m_cap) / (np.sqrt(v_cap) + epsilon)
-        self.parameters[:] = new_parameters.clip(self.bounds)
+        self.parameters[:] = new_parameters.clip(*self.bounds)
         self.update_lr()
         return self.parameters.copy()
 

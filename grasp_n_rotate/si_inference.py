@@ -76,12 +76,7 @@ if __name__ == '__main__':
     hidden_state_mapping = HiddenStateMapping(sim)
     hidden_state_gt = hidden_state_mapping.map_to_hidden_state(mass_gt, mass_mapping,
                                                     friction_gt, friction_mapping)
-    sim_gt.input_parameters(hidden_state_gt["body_mass"], 
-                            hidden_state_gt["body_inertia"], 
-                            hidden_state_gt["body_com"], 
-                            hidden_state_gt["composite_si"], 
-                            hidden_state_gt["si_mapping"], 
-                            u, loss_steps)
+    sim_gt.input_parameters(hidden_state_gt, u, loss_steps)
     sim_gt.run(SIM_STEP, render=True)
     body_qvel_gt = sim_gt.body_qvel.to_numpy()
     body_rvel_gt = sim_gt.body_rvel.to_numpy()
@@ -91,12 +86,7 @@ if __name__ == '__main__':
     for i in range(n_partition):
         hidden_state['composite_si'][i] = 0.39 + 0.1 * np.random.randint(3)
 
-    sim.input_parameters(hidden_state["body_mass"], 
-                         hidden_state["body_inertia"], 
-                         hidden_state["body_com"], 
-                         hidden_state["composite_si"], 
-                         hidden_state["si_mapping"], 
-                         u, loss_steps)
+    sim.input_parameters(hidden_state, u, loss_steps)
 
     # Add parameter to the optimizer
     si_optim = Momentum(hidden_state['composite_si'], lr=1e-1, bounds=[0, 1]
