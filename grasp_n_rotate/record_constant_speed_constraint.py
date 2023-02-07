@@ -22,9 +22,9 @@ from taichi_pushing.optimizer.optim import Momentum
 from taichi_pushing.physics.utils import Defaults
 import matplotlib.pyplot as plt
 
-NUM_ITER = 2000
-SIM_STEP = 50
-SUFFIX = "1"
+NUM_ITER = 3000
+SIM_STEP = 150
+SUFFIX = "2"
 
 ti.init(arch=ti.cpu, debug=True)
 np.random.seed(0)
@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     param_file = os.path.join(ROOT, 'config', args.param_file)
-    sim = HiddenStateSimulator(param_file)
+    sim = HiddenStateSimulator(param_file, max_step=SIM_STEP+2)
 
     mass = 0.1 * np.ones(sim.block_object.num_particle)
     friction = 0.5 * np.ones(sim.block_object.num_particle)
@@ -64,9 +64,9 @@ if __name__ == '__main__':
                                                     friction, friction_mapping)
 
     # ===========  Solve for constraint forces  ============= #
-    constraint_solver = ConstantSpeedConstraintSolver(param_file, SIM_STEP)
+    constraint_solver = ConstantSpeedConstraintSolver(param_file, SIM_STEP, max_step=SIM_STEP+2)
     
-    batch_speed = {i: 10 for i in range(sim.ngeom)}
+    batch_speed = {i: 5 for i in range(sim.ngeom)}
     if not os.path.exists(os.path.join(data_dir, 'batch_speed.txt')):
         temp = np.stack([np.arange(sim.ngeom), np.zeros(sim.ngeom)]).T
     else:
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     np.savetxt(os.path.join(data_dir, 'batch_speed.txt'), temp, fmt='%6d  %10.5f')
 
     external_force = np.zeros((sim.ngeom, SIM_STEP, 2))
-    external_torque = np.zeros(sim.ngeom)
+    external_torque = np.ones(sim.ngeom)
     
     if args.load_history:
         for i in batch_speed.keys():
@@ -87,8 +87,8 @@ if __name__ == '__main__':
     constraint_solver.external_force.from_numpy(external_force)
     constraint_solver.external_torque.from_numpy(external_torque)
 
-    optim_f = Momentum(external_force, lr=5e-1, bounds=[-80, 80], momentum=0.9, k=200, alpha=0.9)
-    optim_t = Momentum(external_torque, lr=5e-4, bounds=[-3, 3], momentum=0.9, k=200, alpha=0.9)
+    optim_f = Momentum(external_force, lr=5e-2, bounds=[-60, 60], momentum=0.9, k=200, alpha=0.9)
+    optim_t = Momentum(external_torque, lr=5e-6, bounds=[-2, 2], momentum=0.9, k=200, alpha=0.9)
 
     constraint_solver.input_parameters(hidden_state)
     constraint_solver.run(batch_speed, auto_diff=False, render=True)
@@ -109,10 +109,10 @@ if __name__ == '__main__':
             gpos = constraint_solver.geom_pos.to_numpy()[:, :SIM_STEP, :]
             rvel = constraint_solver.body_rvel.to_numpy()[:, :SIM_STEP]
             for b in batch_speed.keys():
-                gpos_error = np.linalg.norm(gpos[b,:,b] - gpos[b,0,b], axis=1)
-                rvel_error = rvel[b] - rvel[b,0]
-                print("Batch %d "%b, "gpos error: ", np.array_str(gpos_error, precision=3),
-                         "  rvel error: ", np.array_str(rvel_error, precision=3))
+                gpos_error = np.average(np.linalg.norm(gpos[b,:,b] - gpos[b,0,b], axis=1))
+                rvel_error = np.average(rvel[b] - rvel[b,0])
+                print("Batch %d "%b, "gpos error: %.3f"%gpos_error,
+                         "  rvel error: %.3f"%rvel_error)
 
         # Logging
         if (i+1) % args.save_every == 0:
