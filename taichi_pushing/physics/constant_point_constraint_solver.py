@@ -13,7 +13,7 @@ from .utils import Defaults
 DTYPE = Defaults.DTYPE
 
 @ti.data_oriented
-class ConstantSpeedConstraintSolver:
+class ConstantPointConstraintSolver:
     def __init__(self, param_file, sim_step, max_step=100, dt=Defaults.DT):  # Initializer of the simulator environment
         self.block_object = BlockObject(param_file)
         self.dt = dt
@@ -58,7 +58,7 @@ class ConstantSpeedConstraintSolver:
         self.body_torque = ti.field(DTYPE, shape=(self.ngeom, self.max_step), needs_grad=True)
 
         self.external_force = ti.Vector.field(2, DTYPE, shape=(self.ngeom, sim_step), needs_grad=True)
-        self.external_torque = ti.field(DTYPE, shape=self.ngeom, needs_grad=True)
+        self.external_torque = ti.field(DTYPE, shape=self.ngeom)
 
         # radius of the particles
         self.radius = ti.field(DTYPE, self.ngeom)
@@ -78,9 +78,6 @@ class ConstantSpeedConstraintSolver:
         self.loss_norm_factor = ti.field(ti.f64, shape=())
         self.loss_norm_factor[None] = 1
 
-        self.torque_norm_factor = ti.field(ti.f64, shape=())
-        self.torque_norm_factor[None] = 1
-        
 
     @staticmethod
     @ti.func
@@ -158,9 +155,7 @@ class ConstantSpeedConstraintSolver:
     @ti.kernel
     def add_loss(self, b: ti.i32, s: ti.i32):
         self.loss[None] += self.loss_norm_factor[None] * \
-                        ti.abs(self.geom_pos[b,s,b] - self.geom_pos[b,0,b]).sum()
-        self.loss[None] += self.loss_norm_factor[None] *  self.torque_norm_factor[None] *\
-                        ti.abs(self.body_rvel[b,s] - self.body_rvel[b,0])
+                        ti.abs(self.geom_pos[b,s,b] - self.geom_pos[b,s+1,b]).sum()
          
     def render(self, b, s):  # Render the scene on GUI
         np_pos = self.geom_pos.to_numpy()[b, s]
@@ -252,8 +247,7 @@ class ConstantSpeedConstraintSolver:
                 self.compute_loss(batch_speed)
 
     def compute_loss(self, batch_speed):
-        self.loss_norm_factor[None] = 500
-        self.torque_norm_factor[None] = 1 / self.sim_step
+        self.loss_norm_factor[None] = 1e2
         for b in batch_speed.keys():
             for s in range(self.sim_step - 1):
                 self.add_loss(b, s)

@@ -1,0 +1,4 @@
+shape: "L.txt"
+resol: 1                            # resolution of discretization for each block
+block_size: 0.05                    # side length of the block object (in cm)
+offset: [0.3, 0]
