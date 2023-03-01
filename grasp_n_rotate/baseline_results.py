@@ -63,55 +63,20 @@ if __name__ == '__main__':
                                                     friction_gt, friction_mapping)
     sim_gt.input_parameters(hidden_state_gt, u, loss_steps)
     sim_gt.run(SIM_STEP, batch_speed, auto_diff=False, render=True)
-    body_qvel_gt = sim_gt.body_qvel.to_numpy()
-    body_rvel_gt = sim_gt.body_rvel.to_numpy()
+    geom_pos_gt = sim_gt.geom_pos.to_numpy()
 
-    # ===========  Hidden state inference mass parameters  ============= #
-    hidden_state = hidden_state_gt.copy()
-    # Add noise
-    hidden_state["body_inertia"] += 0.05 * hidden_state["body_inertia"] 
-    hidden_state["body_com"] -= 0.05 * hidden_state["body_com"]
-    for i in range(sim.ngeom):
-        hidden_state['composite_si'][i] = 1
-
-    sim.input_parameters(hidden_state, u, loss_steps)
-
-    # Add parameter to the optimizer
-    si_optim = Momentum(hidden_state['composite_si'], lr=2e-1, bounds=[0.1, 5])
-
-    f = open(os.path.join(data_dir, 'si_inference.txt'), 'w')
-    
-    # GD with momentum
-    for i in range(2000):
+    # ===========  Load Baseline Parameters  ============= #
+    baseline_data = np.loadtxt(os.path.join(data_dir, "baseline_results.txt"))
+    for i in range(5):
+        mass, friction = baseline_data[2*i], baseline_data[2*i+1]
+        hidden_state = hidden_state_mapping.map_to_hidden_state(mass, mass_mapping,
+                                                                friction, friction_mapping)
         sim.input_parameters(hidden_state, u, loss_steps)
-        sim.reset()
-        sim.apply_initial_speed(batch_speed)
-        
-        with ti.ad.Tape(sim.loss):
-            sim.initialize()
-            for k in sim.u:
-                for s in range(SIM_STEP):
-                    sim.bottom_friction(k, s)
-                    sim.apply_external(k, s, sim.u[k][s][0], sim.u[k][s][1], sim.u[k][s][2])
-                    sim.compute_ft(k, s)
-                    sim.forward_body(k, s)
-                    sim.forward_geom(k, s+1)
-        
-            sim.compute_loss(body_qvel_gt, body_rvel_gt)
+        sim.run(SIM_STEP, batch_speed, auto_diff=False, render=True)
+        geom_pos = sim.geom_pos.to_numpy()
 
-        grad = sim.composite_si.grad.to_numpy()
-        hidden_state['composite_si'] = si_optim.step(grad)
+        ### Baseline results
+        nad = np.sum(np.abs(mass - mass_gt)) / np.sum(mass_gt)
+        mpd = np.average(np.linalg.norm(geom_pos[:,SIM_STEP-1,:] - geom_pos_gt[:,SIM_STEP-1,:], axis=-1))
 
-        print('Iteration: %d, Loss: %.9f'%(i, sim.loss[None]), hidden_state["composite_si"])
-        f.write('Iteration: %d, Loss: %.9f\n'%(i, sim.loss[None]))
-
-        if (i+1) % 20 == 0:
-            explicit_state = hidden_state_mapping.map_to_explicit_state(hidden_state, 
-                                                                        mass_mapping, 
-                                                                        friction_mapping)
-            print("Composite mass: " + np.array_str(explicit_state["composite_mass"], precision=4))
-            print("Composite friction: " + np.array_str(explicit_state["composite_friction"], precision=4))
-            f.write("Composite mass: " + np.array_str(explicit_state["composite_mass"], precision=4) + '\n')
-            f.write("Composite friction: " + np.array_str(explicit_state["composite_friction"], precision=4) + '\n')
-
-    f.close()
+        print("NAD: %.5f, MPD: %.5f"%(nad, mpd))

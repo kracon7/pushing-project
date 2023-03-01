@@ -110,12 +110,14 @@ class HiddenStateMapping:
 
         equations = []
         equations.append(sp.Eq(M, hidden_state["body_mass"]))  
+        equations.append(sp.Eq(I, hidden_state["body_inertia"]))
         equations.append(sp.Eq(cx, hidden_state["body_com"][0]))
         equations.append(sp.Eq(cy, hidden_state["body_com"][1]))
-        equations.append(sp.Eq(I, hidden_state["body_inertia"]))
+        assert n_mu <= 4, "Dimension of mu is larger than 4, system is underconstrained!"
+        equations = equations[:n_mu]
         for i in range(n_mass):
             equations.append(sp.Eq(si[i], hidden_state["composite_si"][i]))
-        res = sp.solve(equations, m+mu, dict=True)
+        res = sp.solve(equations, m+mu, dict=True, rational=True)
 
         composite_mass = np.zeros(self.n_particle)
         composite_friction = np.zeros(self.n_particle)

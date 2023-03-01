@@ -152,18 +152,24 @@ class HiddenStateSimulator:
             self.geom_vel[b, s, i] = self.body_qvel[b, s] + self.body_rvel[b, s] \
                                             * self.right_orthogonal(rot @ self.geom_t0[i])
 
+    @ti.kernel
     def initialize(self):
-        for i in range(self.ngeom):
-            for b in range(self.ngeom):
-                self.geom_pos[b, 0, i] = self.composite_p0[i]
+        # set initial geom_pos
+        for b, i in ti.ndrange(self.ngeom, self.ngeom):
+            self.geom_pos[b, 0, i] = self.composite_p0[i]
 
-        for b in range(self.ngeom):
+        for i in self.composite_geom_id:
+            self.geom_si[i] = self.composite_si[self.si_mapping[i]]
+
+        # compute the body_qpos
+        for b in self.composite_geom_id:
             self.body_qpos[b, 0] = self.body_com[None]
         
-        for i in range(self.ngeom):
+        for i in self.composite_geom_id:
+            # geom_t0
             self.geom_t0[i] = self.composite_p0[i] - self.body_com[None]
+            # radius
             self.radius[i] = self.block_object.voxel_size / 2
-
 
     @ti.kernel
     def add_loss(self, b: ti.i32, s: ti.i32, vx: ti.f64, vy: ti.f64, vw: ti.f64):
@@ -233,15 +239,6 @@ class HiddenStateSimulator:
         else:
             raise Exception("Unknown parameter type")
 
-    # def get_parameter(self, param_name):
-    #     if param_name == "mass":
-    #         param = self.composite_mass.to_numpy()
-    #     elif param_name == "friction":
-    #         param = self.composite_friction.to_numpy()
-    #     else:
-    #         raise Exception("Unknown parameter type")
-    #     return param
-
     def apply_initial_speed(self, batch_speed):
         t0 = []
         for i in range(self.ngeom):
@@ -264,34 +261,16 @@ class HiddenStateSimulator:
             self.body_rvel[b, 0] = w
             self.forward_geom(b, 0)
 
-    @ti.kernel
-    def map_si(self):
-        for i in range(self.ngeom):
-            self.geom_si[i] = self.composite_si[self.si_mapping[i]]
-
     def run(self, sim_steps, batch_speed, auto_diff=True, render=False):
         for k in self.u:
             if sim_steps > len(self.u[k]):
                 raise Exception("Undefined control input on particle %d, sim steps too long"%k)
-        
         self.reset()
-        self.initialize()
         self.apply_initial_speed(batch_speed)
-        if not auto_diff:
-            self.map_si()
-            for k in self.u:
-                for s in range(sim_steps):
-                    self.bottom_friction(k, s)
-                    self.apply_external(k, s, self.u[k][s][0], self.u[k][s][1], self.u[k][s][2])
-                    self.compute_ft(k, s)
-                    self.forward_body(k, s)
-                    self.forward_geom(k, s+1)
 
-                    if render:
-                        self.render(k, s)
-        else:
+        if auto_diff:
             with ti.ad.Tape(self.loss):
-                self.map_si()
+                self.initialize()
                 for k in self.u:
                     for s in range(sim_steps):
                         self.bottom_friction(k, s)
@@ -299,6 +278,17 @@ class HiddenStateSimulator:
                         self.compute_ft(k, s)
                         self.forward_body(k, s)
                         self.forward_geom(k, s+1)
+        else:
+            self.initialize()
+            for k in self.u:
+                for s in range(sim_steps):
+                    self.bottom_friction(k, s)
+                    self.apply_external(k, s, self.u[k][s][0], self.u[k][s][1], self.u[k][s][2])
+                    self.compute_ft(k, s)
+                    self.forward_body(k, s)
+                    self.forward_geom(k, s+1)
+                    if render:
+                        self.render(k, s)
 
     def compute_loss(self, body_qvel_gt, body_rvel_gt):
         self.loss_norm_factor[None] = 1 / ( len(self.u.keys()) * 
