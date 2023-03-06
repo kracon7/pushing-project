@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from taichi_pushing.physics.block_object_util import BlockObject
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-param_file = os.path.join(ROOT, 'config', 'block_object_I.yaml')
+param_file = os.path.join(ROOT, 'config', 'hammer.yaml')
 block_object = BlockObject(param_file)
 coord = block_object.particle_coord
 print(block_object.mass_mapping)
