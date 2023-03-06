@@ -27,18 +27,22 @@ def convert_rotation(pose):
     '''
     Compute theta_z in euler angle and 2D rotation matrix from pose quaternion
     '''
-    r_ez, rmat = [], []
+    rmat_pose, rmat_ft = [], []
     for p in pose:
         euler = Rotation.from_quat(p[4:]).as_euler('zyx')
-        theta_z = euler[0] + np.pi / 2
-        cosz, sinz = np.cos(theta_z), np.sin(theta_z)
+        theta_z_pose = euler[0] + np.pi / 2
+        cosz, sinz = np.cos(theta_z_pose), np.sin(theta_z_pose)
         r = np.array([[cosz, -sinz],
                         [sinz, cosz]])
-        r_ez.append(theta_z)
-        rmat.append(r)
-    r_ez = np.stack(r_ez)
-    rmat = np.stack(rmat)
-    return r_ez, rmat
+        rmat_pose.append(r)
+        theta_z_ft = theta_z_pose + 0.08 * np.pi
+        cosz, sinz = np.cos(theta_z_ft), np.sin(theta_z_ft)
+        r = np.array([[cosz, -sinz],
+                        [sinz, cosz]])
+        rmat_ft.append(r)
+    rmat_pose = np.stack(rmat_pose)
+    rmat_ft = np.stack(rmat_ft)
+    return rmat_pose, rmat_ft
 
 def rotate_force(force, rmat):
     '''
@@ -63,8 +67,8 @@ if __name__ == "__main__":
     ft = np.loadtxt(os.path.join(args.data, 'ft300s.txt'), delimiter=',')
     pose = np.loadtxt(os.path.join(args.data, 'pose.txt'), delimiter=',')
     force_interp, torque_interp = time_alignment(ft, pose)
-    r_ez, rmat = convert_rotation(pose)
-    rotated_fx, rotated_fy = rotate_force(force_interp, rmat)
+    rmat_pose, rmat_ft = convert_rotation(pose)
+    rotated_fx, rotated_fy = rotate_force(force_interp, rmat_ft)
     rot_origin = pose[0, 1:3]
 
     # Use relative time for plot
@@ -76,7 +80,7 @@ if __name__ == "__main__":
     block_object = BlockObject(args.block)
     coord = block_object.particle_coord
 
-    rotated_coord = (coord - rot_origin) @ rmat[0] + rot_origin
+    rotated_coord = (coord - rot_origin) @ rmat_pose[0] + rot_origin
     
     fig = make_subplots(
         rows=3, cols=1, subplot_titles=('Force Feedback', 'Torque Feedback', 'Object Particles in Robot Frame'),
@@ -102,7 +106,7 @@ if __name__ == "__main__":
     frames = []
     for i in range(0, nstep, 5):
         # rotate the particle coordinates
-        rotated_coord = (coord - rot_origin) @ rmat[i] + rot_origin
+        rotated_coord = (coord - rot_origin) @ rmat_pose[i] + rot_origin
         quiver = ff.create_quiver([rot_origin[0]], [rot_origin[1]], [rotated_fx[i]], [rotated_fy[i]], 
                                scale=.02, arrow_scale=.1, line_width=1)
         # add frame
